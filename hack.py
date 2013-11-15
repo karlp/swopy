@@ -28,10 +28,21 @@ STLINK_MODE_BOOTLOADER = 4
 
 STLINK_DFU_EXIT = 0x7
 
-STLINK_DEBUG_EXIT = 0x21
-STLINK_DEBUG_APIV2_START_TRACE_RX = 0x40
-STLINK_DEBUG_APIV2_STOP_TRACE_RX = 0x41
-STLINK_DEBUG_APIV2_GET_TRACE_NB =0x42
+STLINK_DEBUG_RUNCORE               = 0x09
+STLINK_DEBUG_ENTER_SWD             = 0xa3
+STLINK_DEBUG_APIV2_ENTER           = 0x30
+STLINK_DEBUG_APIV2_RESETSYS        = 0x32
+STLINK_DEBUG_APIV2_WRITEDEBUGREG   = 0x35
+STLINK_DEBUG_EXIT                  = 0x21
+STLINK_DEBUG_APIV2_START_TRACE_RX  = 0x40
+STLINK_DEBUG_APIV2_STOP_TRACE_RX   = 0x41
+STLINK_DEBUG_APIV2_GET_TRACE_NB    = 0x42
+
+# ARM STUFF
+DCB_DHCSR = 0xE000EDF0
+DBGKEY = (0xA05F << 16)
+C_DEBUGEN = (1<<0)
+
 
 
 if dev is None:
@@ -53,18 +64,6 @@ intf = usb.util.find_descriptor(
 ##        h->cmdbuf[h->cmdidx++] = STLINK_DEBUG_COMMAND;
 #        h->cmdbuf[h->cmdidx++] = STLINK_DEBUG_APIV2_STOP_TRACE_RX;
 #        res = stlink_usb_xfer(handle, h->databuf, 2);
-
-def trace_off(dev):
-    logging.info("Disabling swo tracing")
-    msg = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_APIV2_STOP_TRACE_RX]
-    count = dev.write(STLINK_EP_RX, msg, 0)
-    assert count == len(msg)
-
-def trace_on(dev):
-    logging.info("Enabling swo tracing")
-    msg = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_APIV2_START_TRACE_RX]
-    count = dev.write(STLINK_EP_RX, msg, 0)
-    assert count == len(msg)
 
 class STLinkVersion():
     def __init__(self, blob):
@@ -92,6 +91,7 @@ class STLinkVersion():
         )
 
 def stlink_pad(cmd):
+    # Both actually seem to work....
     #return cmd
     return stlink_pad_real(cmd)
 
@@ -104,16 +104,25 @@ def stlink_pad_real(cmd):
         msg[i] = x
     return msg
 
-def xfer_normal_input(dev, cmd, expected_response_size):
+def xfer_normal_input(dev, cmd, expected_response_size, verbose=True):
     msg = stlink_pad(cmd)
-    print("Sending msg: ", msg)
+    if verbose:
+        print("Sending msg: ", msg)
     count = dev.write(STLINK_EP_TX, msg, 0)
     assert count == len(msg), "Failed to write cmd to usb"
     if expected_response_size:
         res = dev.read(STLINK_EP_RX, expected_response_size, 0)
-        print("Received: ", res)
+        if verbose:
+            print("Received: ", res)
         return res
 
+def xfer_write_debug(dev, reg_addr, val):
+    cmd = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_APIV2_WRITEDEBUGREG]
+    print("Attempting to write %#x to %#x" % (val, reg_addr))
+    args = [ord(q) for q in struct.pack("<II", reg_addr, val)]
+    cmd.extend(args)
+    res = xfer_normal_input(dev, cmd, 2)
+    print("Write debug reg returned: ", res)
 
 def get_version(dev):
     res = xfer_normal_input(dev, [STLINK_GET_VERSION], 6)
@@ -145,6 +154,57 @@ def leave_state(dev, current):
     else:
         logging.debug("Ignoring mode we don't know how to leave/or need to leave")
 
+def enter_state_debug(dev):
+    cmd = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_APIV2_ENTER, STLINK_DEBUG_ENTER_SWD]
+    res = xfer_normal_input(dev, cmd, 2)
+    print("enter debug state returned: ", res)
+    # res[0] should be 0x80
+    assert res[0] == 0x80, "enter state failed :("
+
+def run(dev):
+    cmd = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_RUNCORE]
+    res = xfer_normal_input(dev, cmd, 2)
+    print("RUn returned ", res)
+    return res
+
+def run2(dev):
+    #stlink_usb_write_debug_reg(handle, DCB_DHCSR, DBGKEY|C_DEBUGEN);
+    #  f2 35 f0 ed 00 e0 01 00 5f a0 00 00 00 00 00 00
+    xfer_write_debug(dev, DCB_DHCSR, DBGKEY|C_DEBUGEN)
+
+def trace_off(dev):
+    logging.info("Disabling swo tracing")
+    cmd = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_APIV2_STOP_TRACE_RX]
+    res = xfer_normal_input(dev, cmd, 2)
+    print("Turn off trace returned: ", res)
+
+def trace_on(dev):
+    logging.info("Enabling swo tracing")
+    cmd = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_APIV2_START_TRACE_RX]
+    args = [ord(q) for q in struct.pack("<HI", 4096, 2000000)]
+    cmd.extend(args)
+    # This is what windows stlink sends:     f2 40 00 10 80 84 1e 00 00 00 00 00 00 00 00 00
+    # 16 bit trace size = 0x1000
+    # 32bit hz
+    res = xfer_normal_input(dev, cmd, 2)
+    print("Turn on trace returned: ", res)
+
+# Both of these return 0x80
+# winstlink sets up itm and tpiu unlock stuff too!
+
+def trace_bytes_available(dev):
+    #logging.debug("checking for bytes to read")
+    cmd = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_APIV2_GET_TRACE_NB]
+    res = xfer_normal_input(dev, cmd, 2, verbose=False)
+    bytes = struct.unpack_from("<H", bytearray(res))[0]
+    return bytes
+
+def trace_read(dev, count):
+    logging.debug("reading %d bytes of trace buffer", count)
+    res = dev.read(STLINK_EP_TRACE, count, 0)
+    print("trace read Received: ", res)
+    return res
+
 v = get_version(dev)
 print(v)
 s = get_state(dev)
@@ -156,4 +216,23 @@ if v.jtag_ver >= 13:
     volts = get_voltage(dev)
     print("Voltage: ", volts)
 
-
+enter_state_debug(dev)
+#
+## with trace on, windows st link polls 0xf2, 42 on regular, to get two bytes back, which is the number of trace bytes ready to be read.
+#
+run2(dev) # RUN DAMN YOU!
+#run(dev)
+#
+trace_off(dev)
+trace_on(dev)
+should_exit = False
+while not should_exit:
+    try:
+        pass
+        cnt = trace_bytes_available(dev)
+        if s:
+            r = trace_read(dev, cnt)
+            print("Got tracebytes: ", r)
+    except KeyboardInterrupt:
+        should_exit = True
+#
