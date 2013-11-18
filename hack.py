@@ -1,5 +1,6 @@
 __author__ = 'karlp'
 
+import time
 import logging
 import struct
 import usb.core
@@ -28,6 +29,8 @@ STLINK_MODE_BOOTLOADER = 4
 
 STLINK_DFU_EXIT = 0x7
 
+STLINK_DEBUG_STATUS                = 0x01
+STLINK_DEBUG_RESETSYS              = 0x03 # apiv1 from stlink-texane?!
 STLINK_DEBUG_RUNCORE               = 0x09
 STLINK_DEBUG_ENTER_SWD             = 0xa3
 STLINK_DEBUG_APIV2_ENTER           = 0x30
@@ -161,11 +164,27 @@ def enter_state_debug(dev):
     # res[0] should be 0x80
     assert res[0] == 0x80, "enter state failed :("
 
+def reset(dev):
+    cmd = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_RESETSYS]
+    res = xfer_normal_input(dev, cmd, 2)
+    print("reset returned: ", res)
+
 def run(dev):
     cmd = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_RUNCORE]
     res = xfer_normal_input(dev, cmd, 2)
     print("RUn returned ", res)
     return res
+
+def status(dev):
+    cmd = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_STATUS]
+    res = xfer_normal_input(dev, cmd, 2)
+    print("status returned", res)
+    if res[0] == 0x80:
+        return "RUNNING"
+    elif res[0] == 0x81:
+        return "HALTED"
+    else:
+        return "UNKNOWN"
 
 def run2(dev):
     #stlink_usb_write_debug_reg(handle, DCB_DHCSR, DBGKEY|C_DEBUGEN);
@@ -205,6 +224,8 @@ def trace_read(dev, count):
     print("trace read Received: ", res)
     return res
 
+# Can't be run in DFU mode!
+# print("Status is: ", status(dev))
 v = get_version(dev)
 print(v)
 s = get_state(dev)
@@ -217,22 +238,28 @@ if v.jtag_ver >= 13:
     print("Voltage: ", volts)
 
 enter_state_debug(dev)
+print("Status is: ", status(dev))
 #
 ## with trace on, windows st link polls 0xf2, 42 on regular, to get two bytes back, which is the number of trace bytes ready to be read.
-#
-run2(dev) # RUN DAMN YOU!
-#run(dev)
+
+# reset?!
+print("Status is (before reset): ", status(dev))
+reset(dev)
+print("Status is (after reset): ", status(dev))
+
+#run2(dev) # RUN DAMN YOU!
+run(dev)
 #
 trace_off(dev)
 trace_on(dev)
 should_exit = False
 while not should_exit:
     try:
-        pass
         cnt = trace_bytes_available(dev)
         if s:
             r = trace_read(dev, cnt)
             print("Got tracebytes: ", r)
+        time.sleep(0.5)
     except KeyboardInterrupt:
         should_exit = True
 #
