@@ -3,75 +3,29 @@ __author__ = 'karlp'
 import time
 import logging
 import struct
+import sys
+import cmd
 import usb.core
 import usb.util
-dev = usb.core.find(idVendor=0x0483, idProduct=0x3748)
-#dev = usb.core.find(idProduct="STLINK/V2")
 from magic import *
 
-STLINK_EP_TRACE = 0x83
-STLINK_EP_TX = 0x2
-STLINK_EP_RX = 0x81
 
+def find_stlink():
+    dev = usb.core.find(idVendor=0x0483, idProduct=0x3748)
+    #dev = usb.core.find(idProduct="STLINK/V2")
 
-# ARM STUFF
-SCS_LAR_KEY = 0xC5ACCE55
-SCS_AIRCR = 0xe000ed0c
-SCS_AIRCR_KEY = (0x05fa << 16)
-SCS_AIRCR_VECTCLRACTIVE = (1<<1)
+    if dev is None:
+        raise ValueError('Device not found')
 
-DCB_DEMCR = 0xE000EDFC
-DCB_DEMCR_TRCENA = (1<<24)
-DCB_DEMCR_VC_CORERESET = (1<<0)  # Enable Reset Vector Catch. This causes a Local reset to halt a running system.
-
-DCB_DHCSR = 0xE000EDF0
-DCB_DHCSR_DBGKEY = (0xA05F << 16)
-DCB_DHCSR_C_DEBUGEN = (1<<0)
-DCB_DHCSR_C_HALT = (1<<1)
-
-TPIU_CSPSR = 0xe0040004
-TPIU_ACPR = 0xE0040010
-TPIU_SPPR = 0xE00400F0
-TPIU_FFCR = 0xE0040304
-TPIU_SPPR_TXMODE_PARALELL = 0
-TPIU_SPPR_TXMODE_MANCHESTER = 1
-TPIU_SPPR_TXMODE_NRZ = 2
-
-ITM_LAR = 0xe0000fb0
-ITM_TER = 0xe0000e00
-ITM_TPR = 0xe0000e40
-ITM_TCR = 0xe0000e80
-ITM_TCR_SWOENA			= (1 << 4)
-ITM_TCR_TXENA			= (1 << 3)
-ITM_TCR_SYNCENA			= (1 << 2)
-ITM_TCR_TSENA			= (1 << 1)
-ITM_TCR_ITMENA			= (1 << 0)
-
-DWT_CTRL = 0xE0001000
-
-# STM32 stuff
-DBGMCU_CR = 0xe0042004
-DBGMCU_CR_DEBUG_SLEEP = (1<<0)
-DBGMCU_CR_DEBUG_STOP = (1<<1)
-DBGMCU_CR_DEBUG_STANDBY = (1<<2)
-DBGMCU_CR_DEBUG_TRACE_IOEN = (1<<5)
-DBGMCU_CR_RESERVED_MAGIC_UNKNOWN = (1<<8)
-DBGMCU_APB1_FZ = 0xe0042008
-DBGMCU_APB1_FZ_DBG_IWDG_STOP = (1<<12)
-
-
-
-if dev is None:
-    raise ValueError('Device not found')
-
-dev.set_configuration()
-cfg = dev.get_active_configuration()
-interface_number = cfg[(0,0)].bInterfaceNumber
-alternate_setting = usb.control.get_interface(dev, interface_number)
-intf = usb.util.find_descriptor(
-    cfg, bInterfaceNumber = interface_number,
-    bAlternateSetting = alternate_setting
-)
+    dev.set_configuration()
+    cfg = dev.get_active_configuration()
+    interface_number = cfg[(0,0)].bInterfaceNumber
+    alternate_setting = usb.control.get_interface(dev, interface_number)
+    intf = usb.util.find_descriptor(
+        cfg, bInterfaceNumber = interface_number,
+        bAlternateSetting = alternate_setting
+    )
+    return dev
 
 
 # 0x81 is regualr in, 0x2 is regular out, 0x83 is swo in
@@ -290,220 +244,216 @@ def trace_bytes_available(dev):
 def trace_read(dev, count):
     logging.debug("reading %d bytes of trace buffer", count)
     res = dev.read(STLINK_EP_TRACE, count, 0)
-    print("trace read Received: ", res)
+    #print("trace read Received: ", res)
     return res
 
 # Can't be run in DFU mode!
 # print("Status is: ", status(dev))
-v = get_version(dev)
-print(v)
-s = get_state(dev)
-print("state before", s)
-leave_state(dev, s)
-print("state after", get_state(dev))
+def _hacky_init():
+    dev = find_stlink()
+    s = get_state(dev)
+    print("state before", s)
+    leave_state(dev, s)
+    print("state after", get_state(dev))
+    v = get_version(dev)
+    print(v)
+    s = get_state(dev)
+    print("state before", s)
+    leave_state(dev, s)
+    print("state after", get_state(dev))
 
-if v.jtag_ver >= 13:
-    volts = get_voltage(dev)
-    print("Voltage: ", volts)
+    if v.jtag_ver >= 13:
+        volts = get_voltage(dev)
+        print("Voltage: ", volts)
 
-enter_state_debug(dev)
-print("Status is: ", status(dev))
+    enter_state_debug(dev)
+    print("Status is: ", status(dev))
 
+def _hacktastical(dev):
 
-# Next thing stlink-windows does is:
-# This is not critical, but would definitely help if anyone had turned it on :)
-xfer_write_debug(dev, DBGMCU_APB1_FZ, DBGMCU_APB1_FZ_DBG_IWDG_STOP)
-# stlink-windows does WRITE_DEBUG_REG[reg=0xe0042004, value=263(0x107)
-# THis writes a 1 to a reserved bit in the DBGMCU_CR register, thanks ST!
-xfer_write_debug(dev, DBGMCU_CR, DBGMCU_CR_DEBUG_SLEEP | DBGMCU_CR_DEBUG_STANDBY | DBGMCU_CR_DEBUG_STOP | DBGMCU_CR_RESERVED_MAGIC_UNKNOWN)
-# Then WRITE_DEBUG_REG[reg=0xe000edf0, value=2690580483(0xa05f0003)]
-xfer_write_debug(dev, DCB_DHCSR, DCB_DHCSR_DBGKEY | DCB_DHCSR_C_HALT | DCB_DHCSR_C_DEBUGEN)
-# READ_DEBUG_REG[reg=0xe000edf0]  ==> 0x03030003
-# WRITE_DEBUG_REG[reg=0xe000edf0, value=2690580483(0xa05f0003)]
-# no idea why it needed a second turn?
-# READ_DEBUG_REG[reg=0xe000edf0]  ==> 0x00030003  ==> confirms it's halted, no resets, no retired insructions
-# WRITE_DEBUG_REG[reg=0xe000edfc, value=1(0x1)]
-xfer_write_debug(dev, DCB_DEMCR, DCB_DEMCR_VC_CORERESET) # enables vector catch?!
-# WRITE_DEBUG_REG[reg=0xe000ed0c, value=100270084(0x5fa0004)]  # clears all state info for exceptions.. useful for getting out of lockup I guess?
-xfer_write_debug(dev, SCS_AIRCR, SCS_AIRCR_KEY | SCS_AIRCR_VECTCLRACTIVE)
-# READ_DEBUG_REG[reg=0xe000ed0c] ==> fa050000
-# READ_DEBUG_REG[reg=0xe000edf0] ==> 0x02030003  ==> one reset since last read, who cares...
-# READ_DEBUG_REG[reg=0xe000edf0] ==> 0x00030003  ==> boring...
-# WRITE_REG[reg=0x10, value=1(0x1)]  ==> ?!
-# WRITE_DEBUG_REG[reg=0xe000edfc, value=0(0x0)]
-xfer_write_debug(dev, DCB_DEMCR, 0)  # Disables vector catch again?!
-# READMEM32[addr=0xe000ed00] ==> read CPUID register, we don't care...
-# then the 0xf2, 3e . ==*> 0x80 and lots of 0s
-xfer_unknown_sync(dev)
-# READMEM32[addr=0xe0042000]  ==> read DBGMCU_IDCODE, we don't care...
-xfer_unknown_sync(dev)
-# reads dbgmcu_idcode again, don't care
-# READMEM32[addr=0x1ff8004c]  ==> reads appropriate flash size register
-xfer_unknown_sync(dev)
-# get target voltage
-# READ_DEBUG_REG[reg=0xe000edf0] == > boring.. DHCSR reads again
-# READMEM32[addr=0xe0042000] ==> read DBGMCU_IDCODE again!
-xfer_unknown_sync(dev)
-# It just sits there doing read IDCODE, send sync thing, over and over again
-# for maybe 20-30 loops or more
-# READ_DEBUG_REG[reg=0xe000edf0] ==> DHCSR again
+    # Next thing stlink-windows does is:
+    # This is not critical, but would definitely help if anyone had turned it on :)
+    xfer_write_debug(dev, DBGMCU_APB1_FZ, DBGMCU_APB1_FZ_DBG_IWDG_STOP)
+    # stlink-windows does WRITE_DEBUG_REG[reg=0xe0042004, value=263(0x107)
+    # THis writes a 1 to a reserved bit in the DBGMCU_CR register, thanks ST!
+    xfer_write_debug(dev, DBGMCU_CR, DBGMCU_CR_DEBUG_SLEEP | DBGMCU_CR_DEBUG_STANDBY | DBGMCU_CR_DEBUG_STOP | DBGMCU_CR_RESERVED_MAGIC_UNKNOWN)
+    # Then WRITE_DEBUG_REG[reg=0xe000edf0, value=2690580483(0xa05f0003)]
+    xfer_write_debug(dev, DCB_DHCSR, DCB_DHCSR_DBGKEY | DCB_DHCSR_C_HALT | DCB_DHCSR_C_DEBUGEN)
+    # READ_DEBUG_REG[reg=0xe000edf0]  ==> 0x03030003
+    # WRITE_DEBUG_REG[reg=0xe000edf0, value=2690580483(0xa05f0003)]
+    # no idea why it needed a second turn?
+    # READ_DEBUG_REG[reg=0xe000edf0]  ==> 0x00030003  ==> confirms it's halted, no resets, no retired insructions
+    # WRITE_DEBUG_REG[reg=0xe000edfc, value=1(0x1)]
+    xfer_write_debug(dev, DCB_DEMCR, DCB_DEMCR_VC_CORERESET) # enables vector catch?!
+    # WRITE_DEBUG_REG[reg=0xe000ed0c, value=100270084(0x5fa0004)]  # clears all state info for exceptions.. useful for getting out of lockup I guess?
+    xfer_write_debug(dev, SCS_AIRCR, SCS_AIRCR_KEY | SCS_AIRCR_VECTCLRACTIVE)
+    # READ_DEBUG_REG[reg=0xe000ed0c] ==> fa050000
+    # READ_DEBUG_REG[reg=0xe000edf0] ==> 0x02030003  ==> one reset since last read, who cares...
+    # READ_DEBUG_REG[reg=0xe000edf0] ==> 0x00030003  ==> boring...
+    # WRITE_REG[reg=0x10, value=1(0x1)]  ==> ?!
+    # WRITE_DEBUG_REG[reg=0xe000edfc, value=0(0x0)]
+    xfer_write_debug(dev, DCB_DEMCR, 0)  # Disables vector catch again?!
+    # READMEM32[addr=0xe000ed00] ==> read CPUID register, we don't care...
+    # then the 0xf2, 3e . ==*> 0x80 and lots of 0s
+    xfer_unknown_sync(dev)
+    # READMEM32[addr=0xe0042000]  ==> read DBGMCU_IDCODE, we don't care...
+    xfer_unknown_sync(dev)
+    # reads dbgmcu_idcode again, don't care
+    # READMEM32[addr=0x1ff8004c]  ==> reads appropriate flash size register
+    xfer_unknown_sync(dev)
+    # get target voltage
+    # READ_DEBUG_REG[reg=0xe000edf0] == > boring.. DHCSR reads again
+    # READMEM32[addr=0xe0042000] ==> read DBGMCU_IDCODE again!
+    xfer_unknown_sync(dev)
+    # It just sits there doing read IDCODE, send sync thing, over and over again
+    # for maybe 20-30 loops or more
+    # READ_DEBUG_REG[reg=0xe000edf0] ==> DHCSR again
 
-# WRITEMEM32[addr=0xe000edfc, len=4(0x4)], data = 00 00 00 01 (No idea what endian that is)
-# also, it does it via a writemem32, not a write_debug_reg?!
-# Probably enabling vector catch again?!
-xfer_unknown_sync(dev)
-# READMEM32[addr=0x20000000, length=4] => 00 36 6e 01 stack pointer right? Reading first bytes of ram
-xfer_unknown_sync(dev)
-# READMEM32[addr=0xe0042004, len=4(0x4)]  ==> read DBGMCU_CR  ==> 0x107 => reserved bit still set
-xfer_unknown_sync(dev)
-# WRITEMEM32[addr=0xe0042004, len=4(0x4)] ==> 0x127
-# This does a DBGMCU_CR |= TRACE_IOEN
-enable_trace(dev)
-# WRITEMEM32[addr=0xe0040004, len=4(0x4)] ==> 1 => TPIU_CSPSR = 1
-xfer_write32(dev, TPIU_CSPSR, [1])
-# WRITEMEM32[addr=0xe0040010, len=4(0x4)] ==> 0x0b => TPIU_ACPR = 0xb
-xfer_write32(dev, TPIU_ACPR, [0xb])
-xfer_unknown_sync(dev)
-trace_off(dev)
-trace_on(dev)
-# WRITEMEM32[addr=0xe00400f0, len=4(0x4)] => 2 => TPIU_SPPR mode = NRZ
-xfer_write32(dev, TPIU_SPPR, [TPIU_SPPR_TXMODE_NRZ])
-# READMEM32[addr=0xe0042000, len=4(0x4)]  ==> read DBGMCU_ID yet again
-xfer_unknown_sync(dev)
-xfer_unknown_sync(dev)
-# WRITEMEM32[addr=0xe0040304, len=4(0x4)] => 0
-xfer_write32(dev, TPIU_FFCR, [0]) # Disable continuous formatting
-xfer_unknown_sync(dev)
-# WRITEMEM32[addr=0xe0000fb0, len=4(0x4)] => 0000   55 ce ac c5 (little endian?) => ITM_LAR = 0xC5ACCE55
-xfer_write32(dev, ITM_LAR, [SCS_LAR_KEY])
-xfer_unknown_sync(dev)
-# WRITEMEM32[addr=0xe0000e80, len=4(0x4)] => 0x00010005 ==> ITM_TCR = channel 1 << 16 | ITM_TCR_SYNCENA | ITM_TCR_ITMENA
-xfer_write32(dev, ITM_TCR, [(1<<16 | ITM_TCR_SYNCENA | ITM_TCR_ITMENA)])
-xfer_unknown_sync(dev)
-# WRITEMEM32[addr=0xe0000e00, len=4(0x4)] => 1 => ITM_TER = 1
-xfer_write32(dev, ITM_TER, [1])
-xfer_unknown_sync(dev)
-# WRITEMEM32[addr=0xe0000e40, len=4(0x4)] => 1 => ITM_TPR = 1
-xfer_write32(dev, ITM_TPR, [1])
-xfer_unknown_sync(dev)
-# READMEM32[addr=0x20000000, len=4(0x4)]  ==> who cares....
-# sync
-# READMEM32[addr=0xe0001000, len=4(0x4)] ==> read DWT_CTRL => 0x40000001 ==> 4 comparators, cyc count enabled
-# sync
-# WRITEMEM32[addr=0xe0001000, len=4(0x4)] = 0x40000401 => SYNCTAP 01 = Synchronization counter tap at CYCCNT[24]
-set_dwt_sync_tap(dev, 1)
-xfer_unknown_sync(dev)
-# READ_DEBUG_REG[reg=0xe000edf0] => 0x00030003 BORING DHCSR again
-# WRITE_DEBUG_REG[reg=0xe000edf0, value=2690580481(0xa05f0001)]
-xfer_write_debug(dev, DCB_DHCSR, DCB_DHCSR_DBGKEY | DCB_DHCSR_C_DEBUGEN)
+    # WRITEMEM32[addr=0xe000edfc, len=4(0x4)], data = 00 00 00 01 (No idea what endian that is)
+    # also, it does it via a writemem32, not a write_debug_reg?!
+    # Probably enabling vector catch again?!
+    xfer_unknown_sync(dev)
+    # READMEM32[addr=0x20000000, length=4] => 00 36 6e 01 stack pointer right? Reading first bytes of ram
+    xfer_unknown_sync(dev)
+    # READMEM32[addr=0xe0042004, len=4(0x4)]  ==> read DBGMCU_CR  ==> 0x107 => reserved bit still set
+    xfer_unknown_sync(dev)
+    # WRITEMEM32[addr=0xe0042004, len=4(0x4)] ==> 0x127
+    # This does a DBGMCU_CR |= TRACE_IOEN
+    enable_trace(dev)
+    # WRITEMEM32[addr=0xe0040004, len=4(0x4)] ==> 1 => TPIU_CSPSR = 1
+    xfer_write32(dev, TPIU_CSPSR, [1])
+    # WRITEMEM32[addr=0xe0040010, len=4(0x4)] ==> 0x0b => TPIU_ACPR = 0xb
+    xfer_write32(dev, TPIU_ACPR, [0xb])
+    xfer_unknown_sync(dev)
+    trace_off(dev)
+    trace_on(dev)
+    # WRITEMEM32[addr=0xe00400f0, len=4(0x4)] => 2 => TPIU_SPPR mode = NRZ
+    xfer_write32(dev, TPIU_SPPR, [TPIU_SPPR_TXMODE_NRZ])
+    # READMEM32[addr=0xe0042000, len=4(0x4)]  ==> read DBGMCU_ID yet again
+    xfer_unknown_sync(dev)
+    xfer_unknown_sync(dev)
+    # WRITEMEM32[addr=0xe0040304, len=4(0x4)] => 0
+    xfer_write32(dev, TPIU_FFCR, [0]) # Disable continuous formatting
+    xfer_unknown_sync(dev)
+    # WRITEMEM32[addr=0xe0000fb0, len=4(0x4)] => 0000   55 ce ac c5 (little endian?) => ITM_LAR = 0xC5ACCE55
+    xfer_write32(dev, ITM_LAR, [SCS_LAR_KEY])
+    xfer_unknown_sync(dev)
+    # WRITEMEM32[addr=0xe0000e80, len=4(0x4)] => 0x00010005 ==> ITM_TCR = channel 1 << 16 | ITM_TCR_SYNCENA | ITM_TCR_ITMENA
+    xfer_write32(dev, ITM_TCR, [(1<<16 | ITM_TCR_SYNCENA | ITM_TCR_ITMENA)])
+    xfer_unknown_sync(dev)
+    # WRITEMEM32[addr=0xe0000e00, len=4(0x4)] => 1 => ITM_TER = 1
+    xfer_write32(dev, ITM_TER, [1])
+    xfer_unknown_sync(dev)
+    # WRITEMEM32[addr=0xe0000e40, len=4(0x4)] => 1 => ITM_TPR = 1
+    xfer_write32(dev, ITM_TPR, [1])
+    xfer_unknown_sync(dev)
+    # READMEM32[addr=0x20000000, len=4(0x4)]  ==> who cares....
+    # sync
+    # READMEM32[addr=0xe0001000, len=4(0x4)] ==> read DWT_CTRL => 0x40000001 ==> 4 comparators, cyc count enabled
+    # sync
+    # WRITEMEM32[addr=0xe0001000, len=4(0x4)] = 0x40000401 => SYNCTAP 01 = Synchronization counter tap at CYCCNT[24]
+    set_dwt_sync_tap(dev, 1)
+    xfer_unknown_sync(dev)
+    # READ_DEBUG_REG[reg=0xe000edf0] => 0x00030003 BORING DHCSR again
+    # WRITE_DEBUG_REG[reg=0xe000edf0, value=2690580481(0xa05f0001)]
+    xfer_write_debug(dev, DCB_DHCSR, DCB_DHCSR_DBGKEY | DCB_DHCSR_C_DEBUGEN)
 
-for i in range(120):
-    print("attempting tracebytesavailable(): " , i)
-    x = trace_bytes_available(dev)
-    if x:
-        qq = trace_read(dev, x)
-        print("got trace bytes", qq)
-    time.sleep(0.2)
+    for i in range(120):
+        print("attempting tracebytesavailable(): " , i)
+        x = trace_bytes_available(dev)
+        if x:
+            qq = trace_read(dev, x)
+            print("got trace bytes", qq)
+            xfer_unknown_sync(dev)
+        time.sleep(0.2)
 
-# READMEM32[addr=0xe0042000, len=4(0x4)] read DBGMCU_ID again
-xfer_unknown_sync(dev)
+    # READMEM32[addr=0xe0042000, len=4(0x4)] read DBGMCU_ID again
+    xfer_unknown_sync(dev)
 
-# next, a few sequences of trace_bytes_available()()()()
-xfer_unknown_sync(dev)
-# READMEM32[addr=0xe0042000, len=4(0x4)] yet more reading of DBG_MCU
-# then more tracebytes_avaiable() calls a few times...
+    # next, a few sequences of trace_bytes_available()()()()
+    xfer_unknown_sync(dev)
+    # READMEM32[addr=0xe0042000, len=4(0x4)] yet more reading of DBG_MCU
+    # then more tracebytes_avaiable() calls a few times...
 
-#lots of tracebytes_available, interspersed with sync() and reading DBGMCU_ID
+    #lots of tracebytes_available, interspersed with sync() and reading DBGMCU_ID
 
-# it was out of sync, and I pushed stop/start from stlink...
-trace_off(dev)
-# sync, read DBGMCU_ID again.  seems to just be what it does when idle....
+    # it was out of sync, and I pushed stop/start from stlink...
+    trace_off(dev)
+    # sync, read DBGMCU_ID again.  seems to just be what it does when idle....
 
-# frame 5195, READ_DEBUG_REG[reg=0xe000edf0] read DHCSR again!
-# WRITEMEM32[addr=0xe000edfc, len=4(0x4)] => 0x01000000 ==> DCB_DEMCR = DCB_DEMCR_TRCENA
-xfer_write32(dev, DCB_DEMCR, [DCB_DEMCR_TRCENA])
-xfer_unknown_sync(dev)
-# READMEM32[addr=0x20000000, len=4(0x4)] ==> who cares
-xfer_unknown_sync(dev)
-# READMEM32[addr=0xe0042004, len=4(0x4)] => read DBGMCU_CR == 0x127 (from earlier)
-# WRITEMEM32[addr=0xe0042004, len=4(0x4)] => 0x127
-enable_trace(dev)
-xfer_unknown_sync(dev)
-# WRITEMEM32[addr=0xe0040004, len=4(0x4)]
-xfer_write32(dev, TPIU_CSPSR, [1])
-# WRITEMEM32[addr=0xe0040010, len=4(0x4)] = 0xb
-xfer_write32(dev, TPIU_ACPR, [0xb])
-xfer_unknown_sync(dev)
-trace_off(dev)
-trace_on(dev)
-# WRITEMEM32[addr=0xe00400f0, len=4(0x4)] = 2
-xfer_write32(dev, TPIU_SPPR, [TPIU_SPPR_TXMODE_NRZ])
-# READMEM32[addr=0xe0042000, len=4(0x4)] read DBGMCU_ID again
-xfer_unknown_sync(dev)
-# WRITEMEM32[addr=0xe0040304, len=4(0x4)]
-xfer_write32(dev, TPIU_FFCR, [0]) # Disable continuous formatting
-xfer_unknown_sync(dev)
-# WRITEMEM32[addr=0xe0000fb0, len=4(0x4)]
-xfer_write32(dev, ITM_LAR, [SCS_LAR_KEY])
-xfer_unknown_sync(dev)
-# WRITEMEM32[addr=0xe0000e80, len=4(0x4)]
-xfer_write32(dev, ITM_TCR, [(1<<16 | ITM_TCR_SYNCENA | ITM_TCR_ITMENA)])
-xfer_unknown_sync(dev)
-# WRITEMEM32[addr=0xe0000e00, len=4(0x4)]
-xfer_write32(dev, ITM_TER, [1])
-xfer_unknown_sync(dev)
-# WRITEMEM32[addr=0xe0000e40, len=4(0x4)]
-xfer_write32(dev, ITM_TPR, [1])
-xfer_unknown_sync(dev)
-# READMEM32[addr=0x20000000, len=4(0x4)] ==> pointless read of memory
-xfer_unknown_sync(dev)
-# READMEM32[addr=0xe0001000, len=4(0x4)] => read DWT_CTRL => 0x40000401
-# WRITEMEM32[addr=0xe0001000, len=4(0x4)] = synctap 24 again...
-set_dwt_sync_tap(dev, 1)
-xfer_unknown_sync(dev)
-#READ_DEBUG_REG[reg=0xe000edf0] == read DHCSR, because it's fun ==> 0x01010001
-#READMEM32[addr=0xe0042000, len=4(0x4)] read DBGMCU_ID again
-xfer_unknown_sync(dev)
+    # frame 5195, READ_DEBUG_REG[reg=0xe000edf0] read DHCSR again!
+    # WRITEMEM32[addr=0xe000edfc, len=4(0x4)] => 0x01000000 ==> DCB_DEMCR = DCB_DEMCR_TRCENA
+    xfer_write32(dev, DCB_DEMCR, [DCB_DEMCR_TRCENA])
+    xfer_unknown_sync(dev)
+    # READMEM32[addr=0x20000000, len=4(0x4)] ==> who cares
+    xfer_unknown_sync(dev)
+    # READMEM32[addr=0xe0042004, len=4(0x4)] => read DBGMCU_CR == 0x127 (from earlier)
+    # WRITEMEM32[addr=0xe0042004, len=4(0x4)] => 0x127
+    enable_trace(dev)
+    xfer_unknown_sync(dev)
+    # WRITEMEM32[addr=0xe0040004, len=4(0x4)]
+    xfer_write32(dev, TPIU_CSPSR, [1])
+    # WRITEMEM32[addr=0xe0040010, len=4(0x4)] = 0xb
+    xfer_write32(dev, TPIU_ACPR, [0xb])
+    xfer_unknown_sync(dev)
+    trace_off(dev)
+    trace_on(dev)
+    # WRITEMEM32[addr=0xe00400f0, len=4(0x4)] = 2
+    xfer_write32(dev, TPIU_SPPR, [TPIU_SPPR_TXMODE_NRZ])
+    # READMEM32[addr=0xe0042000, len=4(0x4)] read DBGMCU_ID again
+    xfer_unknown_sync(dev)
+    # WRITEMEM32[addr=0xe0040304, len=4(0x4)]
+    xfer_write32(dev, TPIU_FFCR, [0]) # Disable continuous formatting
+    xfer_unknown_sync(dev)
+    # WRITEMEM32[addr=0xe0000fb0, len=4(0x4)]
+    xfer_write32(dev, ITM_LAR, [SCS_LAR_KEY])
+    xfer_unknown_sync(dev)
+    # WRITEMEM32[addr=0xe0000e80, len=4(0x4)]
+    xfer_write32(dev, ITM_TCR, [(1<<16 | ITM_TCR_SYNCENA | ITM_TCR_ITMENA)])
+    xfer_unknown_sync(dev)
+    # WRITEMEM32[addr=0xe0000e00, len=4(0x4)]
+    xfer_write32(dev, ITM_TER, [1])
+    xfer_unknown_sync(dev)
+    # WRITEMEM32[addr=0xe0000e40, len=4(0x4)]
+    xfer_write32(dev, ITM_TPR, [1])
+    xfer_unknown_sync(dev)
+    # READMEM32[addr=0x20000000, len=4(0x4)] ==> pointless read of memory
+    xfer_unknown_sync(dev)
+    # READMEM32[addr=0xe0001000, len=4(0x4)] => read DWT_CTRL => 0x40000401
+    # WRITEMEM32[addr=0xe0001000, len=4(0x4)] = synctap 24 again...
+    set_dwt_sync_tap(dev, 1)
+    xfer_unknown_sync(dev)
+    #READ_DEBUG_REG[reg=0xe000edf0] == read DHCSR, because it's fun ==> 0x01010001
+    #READMEM32[addr=0xe0042000, len=4(0x4)] read DBGMCU_ID again
+    xfer_unknown_sync(dev)
 
-for i in range(120):
-    print("attempting tracebytesavailable(): " , i)
-    x = trace_bytes_available(dev)
-    if x:
-        qq = trace_read(dev, x)
-        print("got trace bytes", qq)
-    time.sleep(0.1)
+    for i in range(120):
+        print("attempting tracebytesavailable(): " , i)
+        x = trace_bytes_available(dev)
+        if x:
+            qq = trace_read(dev, x)
+            print("got trace bytes", qq)
+            xfer_unknown_sync(dev)
+        time.sleep(0.1)
 
-# from here a regular sequence of trace_bytes_available() mixed with sync() and read dbgmcuid
-# Came back in to proper sync here
-# 0000000000800131
-# 000000000080
-# 0132
-# 000000000080
-# 000000000080
-# 0133
-# 000000000080
-# 0134000000000080
-#
+    # from here a regular sequence of trace_bytes_available() mixed with sync() and read dbgmcuid
+    # Came back in to proper sync here
+    # 0000000000800131
+    # 000000000080
+    # 0132
+    # 000000000080
+    # 000000000080
+    # 0133
+    # 000000000080
+    # 0134000000000080
+    #
 
-# Frame 5935 turning off trace again
-trace_off(dev)
-# read dbgmcu_id again..
+    # Frame 5935 turning off trace again
+    trace_off(dev)
+    # read dbgmcu_id again..
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+#dev = _hacky_init()
+#_hacktastical(dev)
 
 
 
@@ -535,3 +485,158 @@ trace_off(dev)
 #    except KeyboardInterrupt:
 #        should_exit = True
 #
+
+class Swopy(cmd.Cmd):
+    def __init__(self):
+        cmd.Cmd.__init__(self)
+        self.dev = find_stlink()
+
+
+    def do_swo_start(self, args):
+        dev = self.dev
+        xfer_write_debug(dev, DBGMCU_APB1_FZ, DBGMCU_APB1_FZ_DBG_IWDG_STOP)
+        # stlink-windows does WRITE_DEBUG_REG[reg=0xe0042004, value=263(0x107)
+        # THis writes a 1 to a reserved bit in the DBGMCU_CR register, thanks ST!
+        xfer_write_debug(dev, DBGMCU_CR, DBGMCU_CR_DEBUG_SLEEP | DBGMCU_CR_DEBUG_STANDBY | DBGMCU_CR_DEBUG_STOP | DBGMCU_CR_RESERVED_MAGIC_UNKNOWN)
+        # Then WRITE_DEBUG_REG[reg=0xe000edf0, value=2690580483(0xa05f0003)]
+        xfer_write_debug(dev, DCB_DHCSR, DCB_DHCSR_DBGKEY | DCB_DHCSR_C_HALT | DCB_DHCSR_C_DEBUGEN)
+        # READ_DEBUG_REG[reg=0xe000edf0]  ==> 0x03030003
+        # WRITE_DEBUG_REG[reg=0xe000edf0, value=2690580483(0xa05f0003)]
+        # no idea why it needed a second turn?
+        # READ_DEBUG_REG[reg=0xe000edf0]  ==> 0x00030003  ==> confirms it's halted, no resets, no retired insructions
+        # WRITE_DEBUG_REG[reg=0xe000edfc, value=1(0x1)]
+        xfer_write_debug(dev, DCB_DEMCR, DCB_DEMCR_VC_CORERESET) # enables vector catch?!
+        # WRITE_DEBUG_REG[reg=0xe000ed0c, value=100270084(0x5fa0004)]  # clears all state info for exceptions.. useful for getting out of lockup I guess?
+        xfer_write_debug(dev, SCS_AIRCR, SCS_AIRCR_KEY | SCS_AIRCR_VECTCLRACTIVE)
+        # READ_DEBUG_REG[reg=0xe000ed0c] ==> fa050000
+        # READ_DEBUG_REG[reg=0xe000edf0] ==> 0x02030003  ==> one reset since last read, who cares...
+        # READ_DEBUG_REG[reg=0xe000edf0] ==> 0x00030003  ==> boring...
+        # WRITE_REG[reg=0x10, value=1(0x1)]  ==> ?!
+        # WRITE_DEBUG_REG[reg=0xe000edfc, value=0(0x0)]
+        xfer_write_debug(dev, DCB_DEMCR, 0)  # Disables vector catch again?!
+        # READMEM32[addr=0xe000ed00] ==> read CPUID register, we don't care...
+        # then the 0xf2, 3e . ==*> 0x80 and lots of 0s
+        xfer_unknown_sync(dev)
+        # READMEM32[addr=0xe0042000]  ==> read DBGMCU_IDCODE, we don't care...
+        xfer_unknown_sync(dev)
+        # reads dbgmcu_idcode again, don't care
+        # READMEM32[addr=0x1ff8004c]  ==> reads appropriate flash size register
+        xfer_unknown_sync(dev)
+        # get target voltage
+        # READ_DEBUG_REG[reg=0xe000edf0] == > boring.. DHCSR reads again
+        # READMEM32[addr=0xe0042000] ==> read DBGMCU_IDCODE again!
+        xfer_unknown_sync(dev)
+        # It just sits there doing read IDCODE, send sync thing, over and over again
+        # for maybe 20-30 loops or more
+        # READ_DEBUG_REG[reg=0xe000edf0] ==> DHCSR again
+
+        # WRITEMEM32[addr=0xe000edfc, len=4(0x4)], data = 00 00 00 01 (No idea what endian that is)
+        # also, it does it via a writemem32, not a write_debug_reg?!
+        # Probably enabling vector catch again?!
+        xfer_unknown_sync(dev)
+        # READMEM32[addr=0x20000000, length=4] => 00 36 6e 01 stack pointer right? Reading first bytes of ram
+        xfer_unknown_sync(dev)
+        # READMEM32[addr=0xe0042004, len=4(0x4)]  ==> read DBGMCU_CR  ==> 0x107 => reserved bit still set
+        xfer_unknown_sync(dev)
+        # WRITEMEM32[addr=0xe0042004, len=4(0x4)] ==> 0x127
+        # This does a DBGMCU_CR |= TRACE_IOEN
+        enable_trace(dev)
+        # WRITEMEM32[addr=0xe0040004, len=4(0x4)] ==> 1 => TPIU_CSPSR = 1
+        xfer_write32(dev, TPIU_CSPSR, [1])
+        # WRITEMEM32[addr=0xe0040010, len=4(0x4)] ==> 0x0b => TPIU_ACPR = 0xb
+        xfer_write32(dev, TPIU_ACPR, [0xb])
+        xfer_unknown_sync(dev)
+        trace_off(dev)
+        trace_on(dev)
+        # WRITEMEM32[addr=0xe00400f0, len=4(0x4)] => 2 => TPIU_SPPR mode = NRZ
+        xfer_write32(dev, TPIU_SPPR, [TPIU_SPPR_TXMODE_NRZ])
+        # READMEM32[addr=0xe0042000, len=4(0x4)]  ==> read DBGMCU_ID yet again
+        xfer_unknown_sync(dev)
+        xfer_unknown_sync(dev)
+        # WRITEMEM32[addr=0xe0040304, len=4(0x4)] => 0
+        xfer_write32(dev, TPIU_FFCR, [0]) # Disable continuous formatting
+        xfer_unknown_sync(dev)
+        # WRITEMEM32[addr=0xe0000fb0, len=4(0x4)] => 0000   55 ce ac c5 (little endian?) => ITM_LAR = 0xC5ACCE55
+        xfer_write32(dev, ITM_LAR, [SCS_LAR_KEY])
+        xfer_unknown_sync(dev)
+        # WRITEMEM32[addr=0xe0000e80, len=4(0x4)] => 0x00010005 ==> ITM_TCR = channel 1 << 16 | ITM_TCR_SYNCENA | ITM_TCR_ITMENA
+        xfer_write32(dev, ITM_TCR, [(1<<16 | ITM_TCR_SYNCENA | ITM_TCR_ITMENA)])
+        xfer_unknown_sync(dev)
+        # WRITEMEM32[addr=0xe0000e00, len=4(0x4)] => 1 => ITM_TER = 1
+        xfer_write32(dev, ITM_TER, [1])
+        xfer_unknown_sync(dev)
+        # WRITEMEM32[addr=0xe0000e40, len=4(0x4)] => 1 => ITM_TPR = 1
+        xfer_write32(dev, ITM_TPR, [1])
+        xfer_unknown_sync(dev)
+        # READMEM32[addr=0x20000000, len=4(0x4)]  ==> who cares....
+        # sync
+        # READMEM32[addr=0xe0001000, len=4(0x4)] ==> read DWT_CTRL => 0x40000001 ==> 4 comparators, cyc count enabled
+        # sync
+        # WRITEMEM32[addr=0xe0001000, len=4(0x4)] = 0x40000401 => SYNCTAP 01 = Synchronization counter tap at CYCCNT[24]
+        set_dwt_sync_tap(dev, 1)
+        xfer_unknown_sync(dev)
+        # READ_DEBUG_REG[reg=0xe000edf0] => 0x00030003 BORING DHCSR again
+        # WRITE_DEBUG_REG[reg=0xe000edf0, value=2690580481(0xa05f0001)]
+        xfer_write_debug(dev, DCB_DHCSR, DCB_DHCSR_DBGKEY | DCB_DHCSR_C_DEBUGEN)
+
+
+    def do_swo_read(self, args):
+        """
+        attempt to read from the swo endpoint, x times
+        """
+        count = 1
+        if args:
+            try:
+                x = int(args)
+                count = x
+            except ValueError:
+                print("Ignoring invalid count of swo reads to attempt")
+
+        for i in range(count):
+            x = trace_bytes_available(self.dev)
+            if x:
+                qq = trace_read(self.dev, x)
+                print("got trace bytes", qq)
+
+
+    def do_connect(self, args):
+        """Connect to the target"""
+        dev = self.dev
+        s = get_state(dev)
+        print("state before", s)
+        leave_state(dev, s)
+        print("state after", get_state(dev))
+        v = get_version(dev)
+        print(v)
+        s = get_state(dev)
+        print("state before", s)
+        leave_state(dev, s)
+        print("state after", get_state(dev))
+
+        if v.jtag_ver >= 13:
+            volts = get_voltage(dev)
+            print("Voltage: ", volts)
+
+        enter_state_debug(dev)
+        print("Status is: ", status(dev))
+
+    def do_quit(self, args):
+        return True
+
+    def do_disconnect(self, args):
+        pass
+
+    def do_halt(self, args):
+        pass
+
+    def do_run(self, args):
+        """ Attempt to start the processor
+        """
+        run(self.dev)
+
+if __name__ == "__main__":
+    p = Swopy()
+    p.cmdloop()
+
+
+
