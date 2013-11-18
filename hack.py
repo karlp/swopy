@@ -7,44 +7,57 @@ import usb.core
 import usb.util
 dev = usb.core.find(idVendor=0x0483, idProduct=0x3748)
 #dev = usb.core.find(idProduct="STLINK/V2")
+from magic import *
 
 STLINK_EP_TRACE = 0x83
 STLINK_EP_TX = 0x2
 STLINK_EP_RX = 0x81
 
-STLINK_CMD_SIZE_V2          = 16
-
-STLINK_GET_VERSION             = 0xF1
-STLINK_DEBUG_COMMAND           = 0xF2
-STLINK_DFU_COMMAND             = 0xF3
-STLINK_SWIM_COMMAND            = 0xF4
-STLINK_GET_CURRENT_MODE        = 0xF5
-STLINK_GET_TARGET_VOLTAGE      = 0xF7
-
-STLINK_MODE_DFU = 0
-STLINK_MODE_MASS = 1
-STLINK_MODE_DEBUG = 2
-STLINK_MODE_SWIM = 3
-STLINK_MODE_BOOTLOADER = 4
-
-STLINK_DFU_EXIT = 0x7
-
-STLINK_DEBUG_STATUS                = 0x01
-STLINK_DEBUG_RESETSYS              = 0x03 # apiv1 from stlink-texane?!
-STLINK_DEBUG_RUNCORE               = 0x09
-STLINK_DEBUG_ENTER_SWD             = 0xa3
-STLINK_DEBUG_APIV2_ENTER           = 0x30
-STLINK_DEBUG_APIV2_RESETSYS        = 0x32
-STLINK_DEBUG_APIV2_WRITEDEBUGREG   = 0x35
-STLINK_DEBUG_EXIT                  = 0x21
-STLINK_DEBUG_APIV2_START_TRACE_RX  = 0x40
-STLINK_DEBUG_APIV2_STOP_TRACE_RX   = 0x41
-STLINK_DEBUG_APIV2_GET_TRACE_NB    = 0x42
 
 # ARM STUFF
+SCS_LAR_KEY = 0xC5ACCE55
+SCS_AIRCR = 0xe000ed0c
+SCS_AIRCR_KEY = (0x05fa << 16)
+SCS_AIRCR_VECTCLRACTIVE = (1<<1)
+
+DCB_DEMCR = 0xE000EDFC
+DCB_DEMCR_TRCENA = (1<<24)
+DCB_DEMCR_VC_CORERESET = (1<<0)  # Enable Reset Vector Catch. This causes a Local reset to halt a running system.
+
 DCB_DHCSR = 0xE000EDF0
-DBGKEY = (0xA05F << 16)
-C_DEBUGEN = (1<<0)
+DCB_DHCSR_DBGKEY = (0xA05F << 16)
+DCB_DHCSR_C_DEBUGEN = (1<<0)
+DCB_DHCSR_C_HALT = (1<<1)
+
+TPIU_CSPSR = 0xe0040004
+TPIU_ACPR = 0xE0040010
+TPIU_SPPR = 0xE00400F0
+TPIU_FFCR = 0xE0040304
+TPIU_SPPR_TXMODE_PARALELL = 0
+TPIU_SPPR_TXMODE_MANCHESTER = 1
+TPIU_SPPR_TXMODE_NRZ = 2
+
+ITM_LAR = 0xe0000fb0
+ITM_TER = 0xe0000e00
+ITM_TPR = 0xe0000e40
+ITM_TCR = 0xe0000e80
+ITM_TCR_SWOENA			= (1 << 4)
+ITM_TCR_TXENA			= (1 << 3)
+ITM_TCR_SYNCENA			= (1 << 2)
+ITM_TCR_TSENA			= (1 << 1)
+ITM_TCR_ITMENA			= (1 << 0)
+
+DWT_CTRL = 0xE0001000
+
+# STM32 stuff
+DBGMCU_CR = 0xe0042004
+DBGMCU_CR_DEBUG_SLEEP = (1<<0)
+DBGMCU_CR_DEBUG_STOP = (1<<1)
+DBGMCU_CR_DEBUG_STANDBY = (1<<2)
+DBGMCU_CR_DEBUG_TRACE_IOEN = (1<<5)
+DBGMCU_CR_RESERVED_MAGIC_UNKNOWN = (1<<8)
+DBGMCU_APB1_FZ = 0xe0042008
+DBGMCU_APB1_FZ_DBG_IWDG_STOP = (1<<12)
 
 
 
@@ -119,6 +132,10 @@ def xfer_normal_input(dev, cmd, expected_response_size, verbose=True):
             print("Received: ", res)
         return res
 
+def xfer_send_only_raw(dev, data):
+    count = dev.write(STLINK_EP_TX, data, 0)
+    assert count == len(data), "Failed to write data to usb"
+
 def xfer_write_debug(dev, reg_addr, val):
     cmd = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_APIV2_WRITEDEBUGREG]
     print("Attempting to write %#x to %#x" % (val, reg_addr))
@@ -127,8 +144,37 @@ def xfer_write_debug(dev, reg_addr, val):
     res = xfer_normal_input(dev, cmd, 2)
     print("Write debug reg returned: ", res)
 
+def xfer_read32(dev, reg_addr, count):
+    """
+    count is in bytes!
+    """
+    cmd = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_READMEM32]
+    args = [ord(q) for q in struct.pack("<IH", reg_addr, count)]
+    cmd.extend(args)
+    res = xfer_normal_input(dev, cmd, count)
+    print("readmem32 returned %s", res)
+    u32s = struct.unpack("<%dI" % (count/4), res)
+    print("readmem32 u32s: %s", u32s)
+    return u32s
+
+def xfer_write32(dev, reg_addr, data):
+    cmd = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_WRITEMEM32]
+    print("Attempting to write %s to %#x (len=%d)" % (data, reg_addr, len(data)))
+    args = [ord(q) for q in struct.pack("<IH", reg_addr, len(data))]
+    cmd.extend(args)
+    xfer_normal_input(dev, cmd, 0)
+    out_data = struct.pack("<%dI" % len(data), *data)
+    xfer_send_only_raw(dev, out_data)
+
+
+def xfer_unknown_sync(dev):
+    cmd = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_UNKNOWN_MAYBE_SYNC]
+    res = xfer_normal_input(dev, cmd, 12)
+    print("magic unknownn sync returned: ", res)
+    return res
+
 def get_version(dev):
-    res = xfer_normal_input(dev, [STLINK_GET_VERSION], 6)
+    res = xfer_normal_input(dev, [STLINK_GET_VERSION, 0x80], 6)
     v = STLinkVersion(res)
     return v
 
@@ -189,7 +235,7 @@ def status(dev):
 def run2(dev):
     #stlink_usb_write_debug_reg(handle, DCB_DHCSR, DBGKEY|C_DEBUGEN);
     #  f2 35 f0 ed 00 e0 01 00 5f a0 00 00 00 00 00 00
-    xfer_write_debug(dev, DCB_DHCSR, DBGKEY|C_DEBUGEN)
+    xfer_write_debug(dev, DCB_DHCSR, DCB_DHCSR_DBGKEY|DCB_DHCSR_C_DEBUGEN)
 
 def trace_off(dev):
     logging.info("Disabling swo tracing")
@@ -202,11 +248,34 @@ def trace_on(dev):
     cmd = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_APIV2_START_TRACE_RX]
     args = [ord(q) for q in struct.pack("<HI", 4096, 2000000)]
     cmd.extend(args)
+    # f240001080841e000000000000000000
     # This is what windows stlink sends:     f2 40 00 10 80 84 1e 00 00 00 00 00 00 00 00 00
     # 16 bit trace size = 0x1000
     # 32bit hz
     res = xfer_normal_input(dev, cmd, 2)
     print("Turn on trace returned: ", res)
+
+def enable_trace(dev):
+    reg = xfer_read32(dev, DBGMCU_CR, 4)[0]
+    reg |= DBGMCU_CR_DEBUG_TRACE_IOEN
+    xfer_write32(dev, DBGMCU_CR, [reg])
+
+def set_dwt_sync_tap(dev, syncbits):
+    """
+    Selects the position of the synchronization packet counter tap
+on the CYCCNT counter. This determines the
+Synchronization packet rate:
+00 = Disabled. No Synchronization packets.
+01 = Synchronization counter tap at CYCCNT[24]
+10 = Synchronization counter tap at CYCCNT[26]
+11 = Synchronization counter tap at CYCCNT[28]
+For more information see The synchronization packet timer
+on page C1-874.
+    """
+    reg = xfer_read32(dev, DWT_CTRL, 4)[0]
+    reg &= ~(3<<10)
+    reg |= (syncbits << 10)
+    xfer_write32(dev, DWT_CTRL, [reg])
 
 # Both of these return 0x80
 # winstlink sets up itm and tpiu unlock stuff too!
@@ -239,27 +308,230 @@ if v.jtag_ver >= 13:
 
 enter_state_debug(dev)
 print("Status is: ", status(dev))
+
+
+# Next thing stlink-windows does is:
+# This is not critical, but would definitely help if anyone had turned it on :)
+xfer_write_debug(dev, DBGMCU_APB1_FZ, DBGMCU_APB1_FZ_DBG_IWDG_STOP)
+# stlink-windows does WRITE_DEBUG_REG[reg=0xe0042004, value=263(0x107)
+# THis writes a 1 to a reserved bit in the DBGMCU_CR register, thanks ST!
+xfer_write_debug(dev, DBGMCU_CR, DBGMCU_CR_DEBUG_SLEEP | DBGMCU_CR_DEBUG_STANDBY | DBGMCU_CR_DEBUG_STOP | DBGMCU_CR_RESERVED_MAGIC_UNKNOWN)
+# Then WRITE_DEBUG_REG[reg=0xe000edf0, value=2690580483(0xa05f0003)]
+xfer_write_debug(dev, DCB_DHCSR, DCB_DHCSR_DBGKEY | DCB_DHCSR_C_HALT | DCB_DHCSR_C_DEBUGEN)
+# READ_DEBUG_REG[reg=0xe000edf0]  ==> 0x03030003
+# WRITE_DEBUG_REG[reg=0xe000edf0, value=2690580483(0xa05f0003)]
+# no idea why it needed a second turn?
+# READ_DEBUG_REG[reg=0xe000edf0]  ==> 0x00030003  ==> confirms it's halted, no resets, no retired insructions
+# WRITE_DEBUG_REG[reg=0xe000edfc, value=1(0x1)]
+xfer_write_debug(dev, DCB_DEMCR, DCB_DEMCR_VC_CORERESET) # enables vector catch?!
+# WRITE_DEBUG_REG[reg=0xe000ed0c, value=100270084(0x5fa0004)]  # clears all state info for exceptions.. useful for getting out of lockup I guess?
+xfer_write_debug(dev, SCS_AIRCR, SCS_AIRCR_KEY | SCS_AIRCR_VECTCLRACTIVE)
+# READ_DEBUG_REG[reg=0xe000ed0c] ==> fa050000
+# READ_DEBUG_REG[reg=0xe000edf0] ==> 0x02030003  ==> one reset since last read, who cares...
+# READ_DEBUG_REG[reg=0xe000edf0] ==> 0x00030003  ==> boring...
+# WRITE_REG[reg=0x10, value=1(0x1)]  ==> ?!
+# WRITE_DEBUG_REG[reg=0xe000edfc, value=0(0x0)]
+xfer_write_debug(dev, DCB_DEMCR, 0)  # Disables vector catch again?!
+# READMEM32[addr=0xe000ed00] ==> read CPUID register, we don't care...
+# then the 0xf2, 3e . ==*> 0x80 and lots of 0s
+xfer_unknown_sync(dev)
+# READMEM32[addr=0xe0042000]  ==> read DBGMCU_IDCODE, we don't care...
+xfer_unknown_sync(dev)
+# reads dbgmcu_idcode again, don't care
+# READMEM32[addr=0x1ff8004c]  ==> reads appropriate flash size register
+xfer_unknown_sync(dev)
+# get target voltage
+# READ_DEBUG_REG[reg=0xe000edf0] == > boring.. DHCSR reads again
+# READMEM32[addr=0xe0042000] ==> read DBGMCU_IDCODE again!
+xfer_unknown_sync(dev)
+# It just sits there doing read IDCODE, send sync thing, over and over again
+# for maybe 20-30 loops or more
+# READ_DEBUG_REG[reg=0xe000edf0] ==> DHCSR again
+
+# WRITEMEM32[addr=0xe000edfc, len=4(0x4)], data = 00 00 00 01 (No idea what endian that is)
+# also, it does it via a writemem32, not a write_debug_reg?!
+# Probably enabling vector catch again?!
+xfer_unknown_sync(dev)
+# READMEM32[addr=0x20000000, length=4] => 00 36 6e 01 stack pointer right? Reading first bytes of ram
+xfer_unknown_sync(dev)
+# READMEM32[addr=0xe0042004, len=4(0x4)]  ==> read DBGMCU_CR  ==> 0x107 => reserved bit still set
+xfer_unknown_sync(dev)
+# WRITEMEM32[addr=0xe0042004, len=4(0x4)] ==> 0x127
+# This does a DBGMCU_CR |= TRACE_IOEN
+enable_trace(dev)
+# WRITEMEM32[addr=0xe0040004, len=4(0x4)] ==> 1 => TPIU_CSPSR = 1
+xfer_write32(dev, TPIU_CSPSR, [1])
+# WRITEMEM32[addr=0xe0040010, len=4(0x4)] ==> 0x0b => TPIU_ACPR = 0xb
+xfer_write32(dev, TPIU_ACPR, [0xb])
+xfer_unknown_sync(dev)
+trace_off(dev)
+trace_on(dev)
+# WRITEMEM32[addr=0xe00400f0, len=4(0x4)] => 2 => TPIU_SPPR mode = NRZ
+xfer_write32(dev, TPIU_SPPR, [TPIU_SPPR_TXMODE_NRZ])
+# READMEM32[addr=0xe0042000, len=4(0x4)]  ==> read DBGMCU_ID yet again
+xfer_unknown_sync(dev)
+xfer_unknown_sync(dev)
+# WRITEMEM32[addr=0xe0040304, len=4(0x4)] => 0
+xfer_write32(dev, TPIU_FFCR, [0]) # Disable continuous formatting
+xfer_unknown_sync(dev)
+# WRITEMEM32[addr=0xe0000fb0, len=4(0x4)] => 0000   55 ce ac c5 (little endian?) => ITM_LAR = 0xC5ACCE55
+xfer_write32(dev, ITM_LAR, [SCS_LAR_KEY])
+xfer_unknown_sync(dev)
+# WRITEMEM32[addr=0xe0000e80, len=4(0x4)] => 0x00010005 ==> ITM_TCR = channel 1 << 16 | ITM_TCR_SYNCENA | ITM_TCR_ITMENA
+xfer_write32(dev, ITM_TCR, [(1<<16 | ITM_TCR_SYNCENA | ITM_TCR_ITMENA)])
+xfer_unknown_sync(dev)
+# WRITEMEM32[addr=0xe0000e00, len=4(0x4)] => 1 => ITM_TER = 1
+xfer_write32(dev, ITM_TER, [1])
+xfer_unknown_sync(dev)
+# WRITEMEM32[addr=0xe0000e40, len=4(0x4)] => 1 => ITM_TPR = 1
+xfer_write32(dev, ITM_TPR, [1])
+xfer_unknown_sync(dev)
+# READMEM32[addr=0x20000000, len=4(0x4)]  ==> who cares....
+# sync
+# READMEM32[addr=0xe0001000, len=4(0x4)] ==> read DWT_CTRL => 0x40000001 ==> 4 comparators, cyc count enabled
+# sync
+# WRITEMEM32[addr=0xe0001000, len=4(0x4)] = 0x40000401 => SYNCTAP 01 = Synchronization counter tap at CYCCNT[24]
+set_dwt_sync_tap(dev, 1)
+xfer_unknown_sync(dev)
+# READ_DEBUG_REG[reg=0xe000edf0] => 0x00030003 BORING DHCSR again
+# WRITE_DEBUG_REG[reg=0xe000edf0, value=2690580481(0xa05f0001)]
+xfer_write_debug(dev, DCB_DHCSR, DCB_DHCSR_DBGKEY | DCB_DHCSR_C_DEBUGEN)
+
+for i in range(120):
+    print("attempting tracebytesavailable(): " , i)
+    x = trace_bytes_available(dev)
+    if x:
+        qq = trace_read(dev, x)
+        print("got trace bytes", qq)
+    time.sleep(0.2)
+
+# READMEM32[addr=0xe0042000, len=4(0x4)] read DBGMCU_ID again
+xfer_unknown_sync(dev)
+
+# next, a few sequences of trace_bytes_available()()()()
+xfer_unknown_sync(dev)
+# READMEM32[addr=0xe0042000, len=4(0x4)] yet more reading of DBG_MCU
+# then more tracebytes_avaiable() calls a few times...
+
+#lots of tracebytes_available, interspersed with sync() and reading DBGMCU_ID
+
+# it was out of sync, and I pushed stop/start from stlink...
+trace_off(dev)
+# sync, read DBGMCU_ID again.  seems to just be what it does when idle....
+
+# frame 5195, READ_DEBUG_REG[reg=0xe000edf0] read DHCSR again!
+# WRITEMEM32[addr=0xe000edfc, len=4(0x4)] => 0x01000000 ==> DCB_DEMCR = DCB_DEMCR_TRCENA
+xfer_write32(dev, DCB_DEMCR, [DCB_DEMCR_TRCENA])
+xfer_unknown_sync(dev)
+# READMEM32[addr=0x20000000, len=4(0x4)] ==> who cares
+xfer_unknown_sync(dev)
+# READMEM32[addr=0xe0042004, len=4(0x4)] => read DBGMCU_CR == 0x127 (from earlier)
+# WRITEMEM32[addr=0xe0042004, len=4(0x4)] => 0x127
+enable_trace(dev)
+xfer_unknown_sync(dev)
+# WRITEMEM32[addr=0xe0040004, len=4(0x4)]
+xfer_write32(dev, TPIU_CSPSR, [1])
+# WRITEMEM32[addr=0xe0040010, len=4(0x4)] = 0xb
+xfer_write32(dev, TPIU_ACPR, [0xb])
+xfer_unknown_sync(dev)
+trace_off(dev)
+trace_on(dev)
+# WRITEMEM32[addr=0xe00400f0, len=4(0x4)] = 2
+xfer_write32(dev, TPIU_SPPR, [TPIU_SPPR_TXMODE_NRZ])
+# READMEM32[addr=0xe0042000, len=4(0x4)] read DBGMCU_ID again
+xfer_unknown_sync(dev)
+# WRITEMEM32[addr=0xe0040304, len=4(0x4)]
+xfer_write32(dev, TPIU_FFCR, [0]) # Disable continuous formatting
+xfer_unknown_sync(dev)
+# WRITEMEM32[addr=0xe0000fb0, len=4(0x4)]
+xfer_write32(dev, ITM_LAR, [SCS_LAR_KEY])
+xfer_unknown_sync(dev)
+# WRITEMEM32[addr=0xe0000e80, len=4(0x4)]
+xfer_write32(dev, ITM_TCR, [(1<<16 | ITM_TCR_SYNCENA | ITM_TCR_ITMENA)])
+xfer_unknown_sync(dev)
+# WRITEMEM32[addr=0xe0000e00, len=4(0x4)]
+xfer_write32(dev, ITM_TER, [1])
+xfer_unknown_sync(dev)
+# WRITEMEM32[addr=0xe0000e40, len=4(0x4)]
+xfer_write32(dev, ITM_TPR, [1])
+xfer_unknown_sync(dev)
+# READMEM32[addr=0x20000000, len=4(0x4)] ==> pointless read of memory
+xfer_unknown_sync(dev)
+# READMEM32[addr=0xe0001000, len=4(0x4)] => read DWT_CTRL => 0x40000401
+# WRITEMEM32[addr=0xe0001000, len=4(0x4)] = synctap 24 again...
+set_dwt_sync_tap(dev, 1)
+xfer_unknown_sync(dev)
+#READ_DEBUG_REG[reg=0xe000edf0] == read DHCSR, because it's fun ==> 0x01010001
+#READMEM32[addr=0xe0042000, len=4(0x4)] read DBGMCU_ID again
+xfer_unknown_sync(dev)
+
+for i in range(120):
+    print("attempting tracebytesavailable(): " , i)
+    x = trace_bytes_available(dev)
+    if x:
+        qq = trace_read(dev, x)
+        print("got trace bytes", qq)
+    time.sleep(0.1)
+
+# from here a regular sequence of trace_bytes_available() mixed with sync() and read dbgmcuid
+# Came back in to proper sync here
+# 0000000000800131
+# 000000000080
+# 0132
+# 000000000080
+# 000000000080
+# 0133
+# 000000000080
+# 0134000000000080
+#
+
+# Frame 5935 turning off trace again
+trace_off(dev)
+# read dbgmcu_id again..
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 #
 ## with trace on, windows st link polls 0xf2, 42 on regular, to get two bytes back, which is the number of trace bytes ready to be read.
 
+
+
+
 # reset?!
-print("Status is (before reset): ", status(dev))
-reset(dev)
-print("Status is (after reset): ", status(dev))
+#print("Status is (before reset): ", status(dev))
+#reset(dev)
+#print("Status is (after reset): ", status(dev))
 
 #run2(dev) # RUN DAMN YOU!
-run(dev)
+#run(dev)
 #
-trace_off(dev)
-trace_on(dev)
-should_exit = False
-while not should_exit:
-    try:
-        cnt = trace_bytes_available(dev)
-        if s:
-            r = trace_read(dev, cnt)
-            print("Got tracebytes: ", r)
-        time.sleep(0.5)
-    except KeyboardInterrupt:
-        should_exit = True
+#trace_off(dev)
+#trace_on(dev)
+#should_exit = False
+#while not should_exit:
+#    try:
+#        cnt = trace_bytes_available(dev)
+#        if s:
+#            r = trace_read(dev, cnt)
+#            print("Got tracebytes: ", r)
+#        time.sleep(0.5)
+#    except KeyboardInterrupt:
+#        should_exit = True
 #
