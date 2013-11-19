@@ -400,7 +400,7 @@ class Swopy(cmd.Cmd):
 
 
     def do_run(self, args):
-        """ Attempt to start the processor
+        """ Attempt to start the processor (THIS IS BSUTED?!
         """
         run(self.dev)
 
