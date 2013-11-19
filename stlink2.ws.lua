@@ -33,8 +33,12 @@ f.f_dfunc = ProtoField.uint8("stlinkv2.dcmd", "Debug Command", base.HEX, debug_c
 f.f_addr = ProtoField.uint32("stlinkv2.addr", "Address", base.HEX)
 f.f_value = ProtoField.uint32("stlinkv2.value", "Value", base.HEX)
 f.f_length = ProtoField.uint16("stlinkv2.length", "Length", base.DEC)
+f.f_unknown = ProtoField.uint16("stlinkv2.unknown", "unknown", base.HEX)
 f.f_data = ProtoField.bytes("stlinkv2.data", "data")
 f.f_response_status = ProtoField.uint16("stlinkv2.response.status", "status", base.HEX, response_codes)
+f.f_trace_count = ProtoField.uint16("stlinkv2.trace.count", "available", base.DEC)
+f.f_trace_buff = ProtoField.uint16("stlinkv2.trace.buffsize", "buffsize", base.DEC)
+f.f_trace_hz = ProtoField.uint32("stlinkv2.trace.hz", "trace speed (hz)", base.DEC)
 
 local f_usb_ep_num = Field.new("usb.endpoint_number.endpoint")
 
@@ -46,7 +50,7 @@ end
 
 -- write32 doesn't have a response on the in endpoint, it tweaks decoding on the _out_ endpoint
 local responses = {
-    NOTSET = 1, READMEM32 = 2, WRITEDEBUG = 3, READDEBUG = 4,
+    NOTSET = 1, READMEM32 = 2, GENERIC = 3, READDEBUG = 4,
     WRITEMEM32 = 5 }
     
 local expected = responses.NOTSET
@@ -63,19 +67,44 @@ function stlinkv2_proto.dissector(buffer, pinfo, tree)
 	local t_stlinkv2 = tree:add(stlinkv2_proto, buffer())
 	local offset = 0
 
+        local function response_header(res)
+            t_stlinkv2:add_le(f.f_response_status, res)
+            if res:le_uint() == 0x80 then
+                pinfo.cols["info"]:append(" OK")
+            else
+                pinfo.cols["info"]:append(" unknown?!" .. res.le_uint())
+            end
+        end
+
         -- response data on general IN endpoint
 	local ep = f_usb_ep_num()
         if (ep.value == 1) then
                 pinfo.cols["info"] = "Response"
-                if expected == responses.WRITEDEBUG then
-                    t_stlinkv2:add_le(f.f_response_status, buffer(offset, 2))
+                if expected == responses.GENERIC then
+                    local res = buffer(offset, 2)
                     offset = offset + 2
-                    pinfo.cols["info"]:append(" OK")
+                    response_header(res)
+                elseif expected == responses.READDEBUG then
+                    local res = buffer(offset, 2)
+                    response_header(res)
+                    t_stlinkv2:add_le(f.f_unknown, buffer(offset + 2, 2))
+                    local val = buffer(offset + 4, 4)
+                    t_stlinkv2:add_le(f.f_value, val)
+                    pinfo.cols["info"]:append(string.format(" ==> %#010x", val:le_uint()))
+                    offset = offset + 8
                 elseif expected == responses.READMEM32 then
                     -- FIXME - we only handle decoding single word reads :(
                     -- would need to save the count from the request?
-                    t_stlinkv2:add_le(f.f_value, buffer(offset, 4))
+                    local val = buffer(offset, 4)
+                    t_stlinkv2:add_le(f.f_value, val)
                     offset = offset + 4
+                    pinfo.cols["info"]:append(string.format(" ==> %#010x", val:le_uint()))
+                elseif expected == responses.TRACECOUNT then
+                    local val = buffer(offset, 2)
+                    t_stlinkv2:add_le(f.f_trace_count, val)
+                    val = val:le_uint()
+                    offset = offset + 2
+                    pinfo.cols["info"]:append(string.format(" ==> %d (%#x) bytes", val, val))
                 else
 	            t_stlinkv2:add(f.f_data, buffer(offset))
                 end
@@ -121,32 +150,43 @@ function stlinkv2_proto.dissector(buffer, pinfo, tree)
                         local value = buffer(offset + 4, 4)
 			t_stlinkv2:add_le(f.f_addr, addr)
 			t_stlinkv2:add_le(f.f_value, value)
-                        local extra = string.format(" %#x => %d (%#x)", addr:le_uint(), value:le_uint(), value:le_uint())
+                        local extra = string.format(" %#010x => %d (%#010x)", addr:le_uint(), value:le_uint(), value:le_uint())
                         pinfo.cols["info"]:append(extra)
-                        expected = responses.WRITEDEBUG
+                        expected = responses.GENERIC
                         offset = offset + 8
 		elseif tfunc ==  0x36 then -- read debug reg
                         local addr = buffer(offset, 4)
 			t_stlinkv2:add_le(f.f_addr, addr)
-                        pinfo.cols["info"]:append(string.format(" %#x", addr:le_uint()))
+                        pinfo.cols["info"]:append(string.format(" %#010x", addr:le_uint()))
 			offset = offset + 4
                         expected = responses.READDEBUG
 		elseif tfunc == 0x07 then -- readmem32
-                        local addr = buffer(offset, 4):le_uint()
-                        local length = buffer(offset + 4, 2):le_uint()
-			t_stlinkv2:add(f.f_addr, addr)
-			t_stlinkv2:add(f.f_length, length)
-                        pinfo.cols["info"]:append(string.format(" %#x @ %d", addr, length))
+                        local addr = buffer(offset, 4)
+                        local length = buffer(offset + 4, 2)
+			t_stlinkv2:add_le(f.f_addr, addr)
+			t_stlinkv2:add_le(f.f_length, length)
+                        pinfo.cols["info"]:append(string.format(" %#010x @ %d", addr:le_uint(), length:le_uint()))
 			offset = offset + 6
                         expected = responses.READMEM32
 		elseif tfunc == 0x08 then -- writemem32
-                        local addr = buffer(offset, 4):le_uint()
-                        local length = buffer(offset + 4, 2):le_uint()
-			t_stlinkv2:add(f.f_addr, addr)
-			t_stlinkv2:add(f.f_length, length)
-                        pinfo.cols["info"]:append(string.format(" %#x @ %d", addr, length))
+                        local addr = buffer(offset, 4)
+                        local length = buffer(offset + 4, 2)
+			t_stlinkv2:add_le(f.f_addr, addr)
+			t_stlinkv2:add_le(f.f_length, length)
+                        pinfo.cols["info"]:append(string.format(" %#010x @ %d", addr:le_uint(), length:le_uint()))
 			offset = offset + 6
                         expected = responses.WRITEMEM32
+                elseif tfunc == 0x40 then -- start trace
+                        local buffsize = buffer(offset, 2)
+                        local hz = buffer(offset + 2, 4)
+                        t_stlinkv2:add_le(f.f_trace_buff, buffsize)
+                        t_stlinkv2:add_le(f.f_trace_hz, hz)
+                        offset = offset + 6
+                        expected = responses.GENERIC
+                elseif tfunc == 0x41 then
+                        expected = responses.GENERIC
+                elseif tfunc == 0x42 then -- get trace count
+                        expected = responses.TRACECOUNT
 		end
 			
 	end
