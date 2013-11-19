@@ -51,7 +51,9 @@ end
 -- write32 doesn't have a response on the in endpoint, it tweaks decoding on the _out_ endpoint
 local responses = {
     NOTSET = 1, READMEM32 = 2, GENERIC = 3, READDEBUG = 4,
-    WRITEMEM32 = 5 }
+    WRITEMEM32 = 5,
+    TRACECOUNT = 6
+}
     
 local expected = responses.NOTSET
 
@@ -108,6 +110,7 @@ function stlinkv2_proto.dissector(buffer, pinfo, tree)
                 else
 	            t_stlinkv2:add(f.f_data, buffer(offset))
                 end
+                expected = nil
 		return
 	end
 
@@ -118,21 +121,20 @@ function stlinkv2_proto.dissector(buffer, pinfo, tree)
             return
         end
 
---[[
         print ("expected is: " .. tostring(expected))
         print ("responses.WRITEMEM32 is " .. tostring(responses.WRITEMEM32))
         if (expected == responses.WRITEMEM32) then
             assert(ep.value == 2)
             -- FIXME - only works for single word writes!
-            local value = buffer(offset, 4):le_uint()
-            t_stlinkv2:add(f.value, value)
-            pinfo.cols["info"]:append(" Writemem32 data out")
+            local value = buffer(offset, 4)
+            t_stlinkv2:add_le(f.f_value, value)
+            value = value:le_uint()
+            pinfo.cols["info"]= string.format("Write out ==> %d (%#010x)", value, value)
+            expected = nil
             return
         end
-]]--
 
 	local func_code = buffer(offset, 1)
-        expected = responses.NOTSET
 	t_stlinkv2:add(f.f_tfunc, func_code)
         func_code = func_code:uint()
 	offset = offset + 1
@@ -187,6 +189,8 @@ function stlinkv2_proto.dissector(buffer, pinfo, tree)
                         expected = responses.GENERIC
                 elseif tfunc == 0x42 then -- get trace count
                         expected = responses.TRACECOUNT
+                else
+                        expected = nil
 		end
 			
 	end
