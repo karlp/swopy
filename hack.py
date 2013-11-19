@@ -9,6 +9,22 @@ import usb.core
 import usb.util
 from magic import *
 
+lame_py = None
+def _lame_py_buffer_required(inp):
+    return buffer(inp)
+
+def _lame_py_buffer_not_required(inp):
+    return inp
+
+try:
+    blob = [1,2,3,4]
+    struct.unpack_from("<I", bytearray(blob))
+    lame_py = _lame_py_buffer_not_required
+    print("don't need lame pyt fix")
+except TypeError:
+    lame_py = _lame_py_buffer_required
+    print(":( lame py required :(")
+
 
 def find_stlink():
     dev = usb.core.find(idVendor=0x0483, idProduct=0x3748)
@@ -40,8 +56,8 @@ class STLinkVersion():
         # blob = [36, 0, 131, 4, 72, 55]
         # Info : STLINK v2 JTAG v16 API v2 SWIM v0 VID 0x0483 PID 0x3748
         # woo, different byte ordering!
-        ver = struct.unpack_from(">H", bytearray(blob[:2]))[0]
-        self.vid, self.pid = struct.unpack_from("<HH", bytearray(blob[2:]))
+        ver = struct.unpack_from(">H", lame_py(blob[:2]))[0]
+        self.vid, self.pid = struct.unpack_from("<HH", lame_py(blob[2:]))
 
         self.major_ver = (ver >> 12) & 0x0f
         self.jtag_ver = (ver >> 6) & 0x3f
@@ -134,7 +150,7 @@ def get_version(dev):
 
 def get_voltage(dev):
     res = xfer_normal_input(dev, [STLINK_GET_TARGET_VOLTAGE], 8)
-    adc0, adc1 = struct.unpack_from("<II", bytearray(res))
+    adc0, adc1 = struct.unpack_from("<II", lame_py(res))
     print(adc0, adc1)
     assert adc0 != 0
     return 2 * adc1 * (1.2 / adc0)
@@ -238,7 +254,7 @@ def trace_bytes_available(dev):
     #logging.debug("checking for bytes to read")
     cmd = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_APIV2_GET_TRACE_NB]
     res = xfer_normal_input(dev, cmd, 2, verbose=False)
-    bytes = struct.unpack_from("<H", bytearray(res))[0]
+    bytes = struct.unpack_from("<H", lame_py(bytearray(res)))[0]
     return bytes
 
 def trace_read(dev, count):
