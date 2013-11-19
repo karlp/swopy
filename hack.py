@@ -9,6 +9,8 @@ import usb.core
 import usb.util
 from magic import *
 
+logging.basicConfig(level=logging.DEBUG)
+
 lame_py = None
 def _lame_py_buffer_required(inp):
     return buffer(inp)
@@ -90,7 +92,7 @@ def stlink_pad_real(cmd):
         msg[i] = x
     return msg
 
-def xfer_normal_input(dev, cmd, expected_response_size, verbose=True):
+def xfer_normal_input(dev, cmd, expected_response_size, verbose=False):
     msg = stlink_pad(cmd)
     if verbose:
         print("Sending msg: ", msg)
@@ -108,11 +110,22 @@ def xfer_send_only_raw(dev, data):
 
 def xfer_write_debug(dev, reg_addr, val):
     cmd = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_APIV2_WRITEDEBUGREG]
-    print("Attempting to write %#x to %#x" % (val, reg_addr))
     args = [ord(q) for q in struct.pack("<II", reg_addr, val)]
     cmd.extend(args)
     res = xfer_normal_input(dev, cmd, 2)
-    print("Write debug reg returned: ", res)
+    logging.debug("WRITE DEBUG %#x ==> %d (%#08x)", reg_addr, val, val)
+    #assert res ==
+
+def xfer_read_debug(dev, reg_addr):
+    cmd = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_APIV2_READDEBUGREG]
+    args = [ord(q) for q in struct.pack("<I", reg_addr)]
+    cmd.extend(args)
+    res = xfer_normal_input(dev, cmd, 8)
+    status, unknown, val = struct.unpack_from("<HHI", lame_py(bytearray(res)))
+    logging.debug("READ DEBUG: %#x ==> %d (%#08x)", reg_addr, val, val)
+    assert status == 0x80, "failed to read debug reg?!"
+    return val
+
 
 def xfer_read32(dev, reg_addr, count):
     """
@@ -122,21 +135,21 @@ def xfer_read32(dev, reg_addr, count):
     args = [ord(q) for q in struct.pack("<IH", reg_addr, count)]
     cmd.extend(args)
     res = xfer_normal_input(dev, cmd, count)
-    print("readmem32 returned %s", res)
     u32s = struct.unpack("<%dI" % (count/4), res)
-    print("readmem32 u32s: %s", u32s)
+    logging.debug("READMEM32 %#x/%d returned: %s", reg_addr, count, [hex(i) for i in u32s])
     return u32s
 
 def xfer_write32(dev, reg_addr, data):
     cmd = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_WRITEMEM32]
-    print("Attempting to write %s to %#x (len=%d)" % (data, reg_addr, len(data)))
-    args = [ord(q) for q in struct.pack("<IH", reg_addr, len(data))]
+    dlen = len(data) * 4
+    args = [ord(q) for q in struct.pack("<IH", reg_addr, dlen)]
     cmd.extend(args)
     xfer_normal_input(dev, cmd, 0)
     out_data = struct.pack("<%dI" % len(data), *data)
     xfer_send_only_raw(dev, out_data)
+    logging.debug("WRITEMEM32 %#x/%d ==> %s", reg_addr, dlen, [hex(i) for i in data])
 
-unknown_noop = True
+unknown_noop = False
 def xfer_unknown_sync(dev):
     if unknown_noop:
         return
@@ -157,9 +170,10 @@ def get_voltage(dev):
     assert adc0 != 0
     return 2 * adc1 * (1.2 / adc0)
 
-def get_state(dev):
-    res = xfer_normal_input(dev, [STLINK_GET_CURRENT_MODE], 2)
-    return res[0]
+def get_mode(dev):
+    res = xfer_normal_input(dev, [STLINK_GET_CURRENT_MODE], 2)[0]
+    logging.debug("Get mode returned: %d", res)
+    return res
 
 def leave_state(dev, current):
     cmd = None
@@ -178,25 +192,33 @@ def leave_state(dev, current):
 def enter_state_debug(dev):
     cmd = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_APIV2_ENTER, STLINK_DEBUG_ENTER_SWD]
     res = xfer_normal_input(dev, cmd, 2)
-    print("enter debug state returned: ", res)
+    logging.debug("enter debug state returned: %s", res)
     # res[0] should be 0x80
     assert res[0] == 0x80, "enter state failed :("
+
+def exit_debug_mode(dev):
+    logging.debug("Switching out of debug mode...")
+    ## FIXME - send the 0xf2 21
+    xfer_send_only_raw(dev, [STLINK_DEBUG_COMMAND, STLINK_DEBUG_EXIT])
+
 
 def reset(dev):
     cmd = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_RESETSYS]
     res = xfer_normal_input(dev, cmd, 2)
-    print("reset returned: ", res)
+    logging.debug("reset returned: %s", res)
 
 def run(dev):
+    # This doesn't start it running :(
     cmd = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_RUNCORE]
     res = xfer_normal_input(dev, cmd, 2)
-    print("RUn returned ", res)
+    logging.debug("Run returned %s", res)
     return res
 
 def status(dev):
     cmd = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_STATUS]
     res = xfer_normal_input(dev, cmd, 2)
     print("status returned", res)
+    # THis is NOT correct.  it shows "RUNNING" when the core is halted :(
     if res[0] == 0x80:
         return "RUNNING"
     elif res[0] == 0x81:
@@ -207,30 +229,62 @@ def status(dev):
 def run2(dev):
     #stlink_usb_write_debug_reg(handle, DCB_DHCSR, DBGKEY|C_DEBUGEN);
     #  f2 35 f0 ed 00 e0 01 00 5f a0 00 00 00 00 00 00
+    # pressing "run" in the target state pane in stlink sends this
     xfer_write_debug(dev, DCB_DHCSR, DCB_DHCSR_DBGKEY|DCB_DHCSR_C_DEBUGEN)
+    # then just does a read of DCB_DHCSR,
+    # then a read of 0x20000000 @ 4
+    # then a read of x40023c1c @ 4 => 0x007800aa (FLASH_OBR, reeading option bytes and flash readout protection)
+    # then one more read of DCB_DHCSR for good measure...
 
 def trace_off(dev):
-    logging.info("Disabling swo tracing")
     cmd = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_APIV2_STOP_TRACE_RX]
     res = xfer_normal_input(dev, cmd, 2)
-    print("Turn off trace returned: ", res)
+    logging.debug("STOP TRACE")
 
-def trace_on(dev):
-    logging.info("Enabling swo tracing")
+def trace_on(dev, buff=4096, hz=2000000):
     cmd = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_APIV2_START_TRACE_RX]
-    args = [ord(q) for q in struct.pack("<HI", 4096, 2000000)]
+    args = [ord(q) for q in struct.pack("<HI", buff, hz)]
     cmd.extend(args)
     # f240001080841e000000000000000000
     # This is what windows stlink sends:     f2 40 00 10 80 84 1e 00 00 00 00 00 00 00 00 00
     # 16 bit trace size = 0x1000
     # 32bit hz
     res = xfer_normal_input(dev, cmd, 2)
-    print("Turn on trace returned: ", res)
+    logging.debug("START TRACE (buffer= %d, hz= %d)", buff, hz)
 
-def enable_trace(dev):
+def enable_trace(dev, stim_bits=1):
+    logging.info("Enabling trace")
+    reg = xfer_read_debug(dev, DCB_DHCSR)
+    # FIXME - if this isn't ok, probably need to reset it!
+
+    #--- everything below here was originally separated by magic_sync calls?!
+    xfer_write_debug(dev, DCB_DEMCR, DCB_DEMCR_TRCENA)
+    # weird pointless read of SRAM here?!
+
     reg = xfer_read32(dev, DBGMCU_CR, 4)[0]
-    reg |= DBGMCU_CR_DEBUG_TRACE_IOEN
+    reg |= DBGMCU_CR_DEBUG_TRACE_IOEN | DBGMCU_CR_DEBUG_STOP | DBGMCU_CR_DEBUG_STANDBY | DBGMCU_CR_DEBUG_SLEEP
     xfer_write32(dev, DBGMCU_CR, [reg])
+
+    xfer_write32(dev, TPIU_CSPSR, [1]) # 8bit wide data
+    xfer_write32(dev, TPIU_ACPR, [0xb]) # async prescalar
+    trace_off(dev)
+    trace_on(dev)
+    xfer_write32(dev, TPIU_SPPR, [TPIU_SPPR_TXMODE_NRZ])
+    xfer_write32(dev, TPIU_FFCR, [0])
+    xfer_write32(dev, ITM_LAR, [SCS_LAR_KEY])
+    xfer_write32(dev, ITM_TCR, [((1<<16) | ITM_TCR_SYNCENA | ITM_TCR_ITMENA)])
+    xfer_write32(dev, ITM_TER, [stim_bits])
+    xfer_write32(dev, ITM_TPR, [stim_bits])
+    # weird read of SRAM here?
+    set_dwt_sync_tap(dev, 1)
+    # READ DEBUG REG 0xe000edf0 => 0x01010001
+    reg = xfer_read32(dev, DCB_DHCSR, 4)[0]
+    print("DCB_DHCSR == %#x" % reg)
+    # fixme - again, if this isn't ok, probably need to do something, like start it running or something....
+    # get another trace or two!
+
+
+
 
 def set_dwt_sync_tap(dev, syncbits):
     """
@@ -269,16 +323,12 @@ def trace_read(dev, count):
 # print("Status is: ", status(dev))
 def _hacky_init():
     dev = find_stlink()
-    s = get_state(dev)
-    print("state before", s)
+    s = get_mode(dev)
     leave_state(dev, s)
-    print("state after", get_state(dev))
     v = get_version(dev)
     print(v)
-    s = get_state(dev)
-    print("state before", s)
+    s = get_mode(dev)
     leave_state(dev, s)
-    print("state after", get_state(dev))
 
     if v.jtag_ver >= 13:
         volts = get_voltage(dev)
@@ -510,7 +560,7 @@ class Swopy(cmd.Cmd):
         self.dev = find_stlink()
 
 
-    def do_swo_start(self, args):
+    def do_swo_start_old(self, args):
         dev = self.dev
         xfer_write_debug(dev, DBGMCU_APB1_FZ, DBGMCU_APB1_FZ_DBG_IWDG_STOP)
         # stlink-windows does WRITE_DEBUG_REG[reg=0xe0042004, value=263(0x107)
@@ -597,6 +647,11 @@ class Swopy(cmd.Cmd):
         # WRITE_DEBUG_REG[reg=0xe000edf0, value=2690580481(0xa05f0001)]
         xfer_write_debug(dev, DCB_DHCSR, DCB_DHCSR_DBGKEY | DCB_DHCSR_C_DEBUGEN)
 
+    def do_swo_start(self, args):
+        enable_trace(self.dev, 1)
+
+    def do_swo_stop(self, args):
+        trace_off(self.dev)
 
     def do_swo_read(self, args):
         """
@@ -620,16 +675,10 @@ class Swopy(cmd.Cmd):
     def do_connect(self, args):
         """Connect to the target"""
         dev = self.dev
-        s = get_state(dev)
-        print("state before", s)
-        leave_state(dev, s)
-        print("state after", get_state(dev))
         v = get_version(dev)
         print(v)
-        s = get_state(dev)
-        print("state before", s)
+        s = get_mode(dev)
         leave_state(dev, s)
-        print("state after", get_state(dev))
 
         if v.jtag_ver >= 13:
             volts = get_voltage(dev)
@@ -642,19 +691,48 @@ class Swopy(cmd.Cmd):
         return True
 
     def do_disconnect(self, args):
-        pass
+        exit_debug_mode(self.dev)
 
-    def do_halt(self, args):
-        pass
 
     def do_run(self, args):
         """ Attempt to start the processor
         """
         run(self.dev)
 
+    def do_idle(self, args):
+        """do stupid shit like stlink, send a sync command"""
+        xfer_unknown_sync(self.dev)
+
+    def do_mode(self, args):
+        s = get_mode(self.dev)
+        print("State is %#x" % s)
+
+    def do_leave_state(self, args):
+        #s = get_mode(self.dev)
+        leave_state(self.dev, int(args))
+
+    def do_version(self, args):
+        v = get_version(self.dev)
+        print(v)
+
+    def do_raw_read_debug_reg(self, args):
+        reg = int(args, base=0)
+        v = xfer_read_debug(self.dev, reg)
+        print("register %#x = %d (%#08x)" % (reg, v, v))
+
+    def do_hack(self, args):
+            xfer_write_debug(self.dev, DCB_DHCSR, DCB_DHCSR_DBGKEY | DCB_DHCSR_C_DEBUGEN)
+
+
+    def close(self):
+        exit_debug_mode(self.dev)
+
+
+
 if __name__ == "__main__":
     p = Swopy()
     p.cmdloop()
+    p.close()
 
 
 

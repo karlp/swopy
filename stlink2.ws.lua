@@ -12,15 +12,22 @@ local top_funcs = {
 local debug_command_funcs = {
 	[0x7] = "READMEM32",
 	[0x8] = "WRITEMEM32",
-	[0xa3] = "ENTER SWD",
+        [0x21] = "Exit Debug",
+	[0x30] = "ENTER",
 	[0x33] = "READ REG",
 	[0x34] = "WRITE REG",
 	[0x35] = "WRITE DEBUG REG",
 	[0x36] = "READ DEBUG REG",
+        [0x3a] = "Read all registers",
 	[0x3e] = "UNKNOWN MAGIC SYNC",
 	[0x40] = "Start Trace",
 	[0x41] = "Stop Trace",
 	[0x42] = "Get Trace Count"
+}
+
+local command_enter_funcs = {
+    [0x00] = "Enter JTAG",
+    [0xa3] = "Enter SWD"
 }
 
 local response_codes = {
@@ -28,8 +35,9 @@ local response_codes = {
 }
 
 local f = stlinkv2_proto.fields
-f.f_tfunc = ProtoField.uint8("stlinkv2.tfunc", "Function", base.HEX, top_funcs)
-f.f_dfunc = ProtoField.uint8("stlinkv2.dcmd", "Debug Command", base.HEX, debug_command_funcs)
+f.f_tfunc = ProtoField.uint8("stlinkv2.function", "Function", base.HEX, top_funcs)
+f.f_dfunc = ProtoField.uint8("stlinkv2.debug.command", "Debug Command", base.HEX, debug_command_funcs)
+f.f_dsubfunc = ProtoField.uint8("stlinkv2.debug.subcommand", "Debug subcommand", base.HEX, command_enter_funcs)
 f.f_addr = ProtoField.uint32("stlinkv2.addr", "Address", base.HEX)
 f.f_value = ProtoField.uint32("stlinkv2.value", "Value", base.HEX)
 f.f_length = ProtoField.uint16("stlinkv2.length", "Length", base.DEC)
@@ -187,10 +195,15 @@ function stlinkv2_proto.dissector(buffer, pinfo, tree)
                         t_stlinkv2:add_le(f.f_trace_hz, hz)
                         offset = offset + 6
                         expected = responses.GENERIC
-                elseif tfunc == 0x41 then
+                elseif tfunc == 0x41 then -- stoptrace
                         expected = responses.GENERIC
                 elseif tfunc == 0x42 then -- get trace count
                         expected = responses.TRACECOUNT
+                elseif tfunc == 0x30 then -- enter subcommand
+		        subfunc = buffer(offset, 1)
+		        t_stlinkv2:add(f.f_dsubfunc, subfunc)
+                        expected = responses.GENERIC
+                        offset = offset + 1
                 else
                         expected = nil
 		end
