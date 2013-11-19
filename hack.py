@@ -149,7 +149,7 @@ def xfer_write32(dev, reg_addr, data):
     xfer_send_only_raw(dev, out_data)
     logging.debug("WRITEMEM32 %#x/%d ==> %s", reg_addr, dlen, [hex(i) for i in data])
 
-unknown_noop = False
+unknown_noop = True
 def xfer_unknown_sync(dev):
     if unknown_noop:
         return
