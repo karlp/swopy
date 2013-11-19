@@ -1,4 +1,4 @@
-stlinkv2_proto = Proto("stlinkv2", "STLink/V2 api (lua)")
+stlinkv2_proto = Proto("stlinkv2", "STLink/V2 api")
 
 local top_funcs = {
 	[0xf1] = "GET VERSION",
@@ -60,10 +60,13 @@ local expected = responses.NOTSET
 function stlinkv2_proto.dissector(buffer, pinfo, tree)
 	pinfo.cols["protocol"] = "STLinkv2"
 
+        --[[
+        -- This was very helpful for working out the field names I could use with Field.new()
         local fields = { all_field_infos() }
         for ix, finfo in ipairs(fields) do
             print(string.format("ix=%d, finfo.name = %s, finfo.value=%s", ix, finfo.name, getstring(finfo)))
         end
+        ]]--
 
 	-- create protocol tree
 	local t_stlinkv2 = tree:add(stlinkv2_proto, buffer())
@@ -71,6 +74,7 @@ function stlinkv2_proto.dissector(buffer, pinfo, tree)
 
         local function response_header(res)
             t_stlinkv2:add_le(f.f_response_status, res)
+            -- TODO - this should use the response_codes map I think?!
             if res:le_uint() == 0x80 then
                 pinfo.cols["info"]:append(" OK")
             else
@@ -121,8 +125,6 @@ function stlinkv2_proto.dissector(buffer, pinfo, tree)
             return
         end
 
-        print ("expected is: " .. tostring(expected))
-        print ("responses.WRITEMEM32 is " .. tostring(responses.WRITEMEM32))
         if (expected == responses.WRITEMEM32) then
             assert(ep.value == 2)
             -- FIXME - only works for single word writes!
@@ -198,4 +200,7 @@ function stlinkv2_proto.dissector(buffer, pinfo, tree)
 end
 
 usb_table = DissectorTable.get("usb.bulk")
+-- this is the vendor specific class, which is how the usb.bulk table is arranged.
 usb_table:add(0xff, stlinkv2_proto)
+-- this is the unknown class, which seems to happen with oocd?!
+usb_table:add(0xffff, stlinkv2_proto)
