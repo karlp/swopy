@@ -344,7 +344,15 @@ class Swopy(cmd.Cmd):
         self.dev = find_stlink()
 
     def do_swo_start(self, args):
-        enable_trace(self.dev, 1)
+        stimbits = 1
+        if args:
+            try:
+                x = int(args, base=0)
+                stimbits = x
+            except ValueError:
+                print("Ignoring invalid stim bits")
+
+        enable_trace(self.dev, stimbits)
 
     def do_swo_stop(self, args):
         trace_off(self.dev)
@@ -365,7 +373,8 @@ class Swopy(cmd.Cmd):
             x = trace_bytes_available(self.dev)
             if x:
                 qq = trace_read(self.dev, x)
-                print("got trace bytes", qq)
+                print("got trace bytes (raw)", qq)
+                print("trace bytes as chars: ", [chr(x) for x in qq])
 
 
     def do_connect(self, args):
