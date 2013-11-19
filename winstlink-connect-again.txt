@@ -1,0 +1,26 @@
+# had already connected once, tried to connect again
+GET VERSION (always first)
+GET MODE => 2
+GET VOLTAGE
+ENTER SWD
+10  99.182781000    host    121.2   STLinkv2    80  DEBUG COMMAND - WRITE DEBUG REG 0xe0042008 => 4096 (0x00001000)
+12  99.186770000    host    121.2   STLinkv2    80  DEBUG COMMAND - WRITE DEBUG REG 0xe0042004 => 263 (0x00000107)
+14  99.190804000    host    121.2   STLinkv2    80  DEBUG COMMAND - WRITE DEBUG REG 0xe000edf0 => 2690580483 (0xa05f0003)
+16  99.194795000    host    121.2   STLinkv2    80  DEBUG COMMAND - READ DEBUG REG 0xe000edf0 = > 0x01030003
+18  99.198768000    host    121.2   STLinkv2    80  DEBUG COMMAND - WRITE DEBUG REG 0xe000edfc => 1 (0x00000001)
+20  99.202787000    host    121.2   STLinkv2    80  DEBUG COMMAND - WRITE DEBUG REG 0xe000ed0c => 100270084 (0x05fa0004)
+22  99.206749000    host    121.2   STLinkv2    80  DEBUG COMMAND - READ DEBUG REG 0xe000ed0c => 0xfa050000
+24  99.210763000    host    121.2   STLinkv2    80  DEBUG COMMAND - READ DEBUG REG 0xe000edf0 => 0x02030003
+26  99.214807000    host    121.2   STLinkv2    80  DEBUG COMMAND - READ DEBUG REG 0xe000edf0 => 0x00030003
+28  99.218762000    host    121.2   STLinkv2    80  DEBUG COMMAND - WRITE REG (r1 = 1?!)
+30  99.222846000    host    121.2   STLinkv2    80  DEBUG COMMAND - WRITE DEBUG REG 0xe000edfc => 0 (0000000000)
+32  99.357854000    host    121.2   STLinkv2    80  DEBUG COMMAND - READMEM32 0xe000ed00 @ 4 => 0x412fc230
+magic_sync
+36  99.365815000    host    121.2   STLinkv2    80  DEBUG COMMAND - READMEM32 0xe0042000 @ 4 => 0x10186416
+magic_sync
+40  99.373786000    host    121.2   STLinkv2    80  DEBUG COMMAND - READMEM32 0xe0042000 @ 4 => 0x10186416
+magic_sync
+44  99.381766000    host    121.2   STLinkv2    80  DEBUG COMMAND - READMEM32 0x1ff8004c @ 4 => 0x00000080
+magic_sync
+GET VOLTAGE
+-- exactly the same as the other one at this point, entirely.  Just differences in exit dfu mode call.

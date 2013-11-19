@@ -1,0 +1,75 @@
+24meg, stimulus 0
+
+48895   616.225850000   host    122.2   STLinkv2    80  DEBUG COMMAND - READ DEBUG REG 0xe000edf0 => 0x10180080
+48899   616.246857000   host    122.2   STLinkv2    80  DEBUG COMMAND - WRITEMEM32 0xe000edfc @ 4 => 0x01000000  | DEMCR = TRACE ENABLE
+magic_sync
+48907   616.254888000   host    122.2   STLinkv2    80  DEBUG COMMAND - READMEM32 0x20000000 @ 4 => 0x016e3600
+magic_sync
+48917   616.262839000   host    122.2   STLinkv2    80  DEBUG COMMAND - READMEM32 0xe0042004 @ 4 => 0x00000127
+magic_sync
+48925   616.270883000   host    122.2   STLinkv2    80  DEBUG COMMAND - WRITEMEM32 0xe0042004 @ 4 => 0x00000127 | DBGMCU_CR turn on debug in LP
+magic_sync
+48933   616.278833000   host    122.2   STLinkv2    80  DEBUG COMMAND - WRITEMEM32 0xe0040004 @ 4 => 0x00000001 | TPIU_CSPSR = 8bit wide trace
+magic_sync
+48941   616.286855000   host    122.2   STLinkv2    80  DEBUG COMMAND - WRITEMEM32 0xe0040010 @ 4 => 0x0000000b | TPIU_ACPR = async prescalar
+magic_sync
+STOP TRACE
+START TRACE 4096 @ 2000000
+48959   616.302846000   host    122.2   STLinkv2    80  DEBUG COMMAND - WRITEMEM32 0xe00400f0 @ 4 => 0x00000002 | TPIU_SPSR = NRZ
+magic_sync
+48967   616.310909000   host    122.2   STLinkv2    80  DEBUG COMMAND - WRITEMEM32 0xe0040304 @ 4 => 0          | TPIU_FFCR = no sync flush
+magic_sync
+48975   616.318852000   host    122.2   STLinkv2    80  DEBUG COMMAND - WRITEMEM32 0xe0000fb0 @ 4 => 0xc5acce55 | ITM_LAR = LAR_KEY
+magic_sync
+xxxxx   616.xxxxxxxxx   host    122.2   STLinkv2    80  DEBUG COMMAND - WRITEMEM32 0xe0000e80 @ 4 => 0x00010005 | ITM_TCR = chan1 + sync + itm_en
+magic_sync
+48991   616.334865000   host    122.2   STLinkv2    80  DEBUG COMMAND - WRITEMEM32 0xe0000e00 @ 4 => 0x00000001 | ITM_TER = 1
+magic_sync
+49001   616.342854000   host    122.2   STLinkv2    80  DEBUG COMMAND - WRITEMEM32 0xe0000e40 @ 4 => 0x00000001 | ITM_TPR = 1
+magic_sync
+49009   616.350879000   host    122.2   STLinkv2    80  DEBUG COMMAND - READMEM32 0x20000000 @ 4
+magic_sync
+49017   616.358832000   host    122.2   STLinkv2    80  DEBUG COMMAND - READMEM32 0xe0001000 @ 4 => 0x40000001 | DWT_CTRL
+magic_sync
+49025   616.367844000   host    122.2   STLinkv2    80  DEBUG COMMAND - WRITEMEM32 0xe0001000 @ 4 => 0x40000401 | DWT_CTRL |= sync tap = 1
+magic_sync
+49033   616.376893000   host    122.2   STLinkv2    80  DEBUG COMMAND - READ DEBUG REG 0xe000edf0 => 0x01010001
+GET TRACE COUNT = 6
+SWO DATA
+49043   616.437857000   host    122.2   STLinkv2    80  DEBUG COMMAND - READMEM32 0xe0042000 @ 4 => 0x10186416
+magic_sync
+GET TRACE COUNT = 0
+GET TRACE COUNT = 0
+GET TRACE COUNT = 2
+SWO DATA
+reread chipid
+magic_sync
+GET TRACE COUNT = 0
+GET TRACE COUNT = 0
+GET TRACE COUNT = 6
+SWO DATA
+read chipid
+magic_sync
+GET TRACE COUNT = 0
+GET TRACE COUNT = 0
+GET TRACE COUNT = 0
+GET TRACE COUNT = 0
+GET TRACE COUNT = 0
+read chipid
+magic_sync
+GET TRACEOUNT = 6
+SWO DATA
+GET TRACE COUNT = 2
+SWO DATA
+read chipid
+magic_sync
+GET TRACE COUNT
+blah blah blah
+STOP TRACE
+read chipid, |
+magic_sync   |- * 5
+STOP TRACE
+more chipid read+ magic sync
+finally a 
+50951   631.101493000   host    122.2   STLinkv2    80  DEBUG COMMAND - WRITE DEBUG REG 0xe000edf0 => 2690580483 (0xa05f0003)
+
