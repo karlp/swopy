@@ -32,19 +32,15 @@ f.f_length = ProtoField.uint16("stlinkv2.length", "Length", base.DEC)
 f.f_data = ProtoField.bytes("stlinkv2.data", "data")
 
 
-f_usb_endpoint = Field.new("usb.bEndpointAddress")
-
 function stlinkv2_proto.dissector(buffer, pinfo, tree)
 	pinfo.cols["protocol"] = "STLinkv2"
 
-	-- this doesn't work :(
-	local usb_ep = f_usb_endpoint()
-	--print("usb_ep == " .. tostring(usb_ep))
-	if usb_ep and usb_ep.value ~= 2 then
-		warn("ignoring non-ep2")
+	-- don't try and decode inbound packets like this.
+	-- this doesn't work either :(
+	print(pinfo.dst)
+	if pinfo.dst == "host" then
 		return
 	end
-	print(pinfo.cols)
 
 	-- create protocol tree
 	local t_stlinkv2 = tree:add(stlinkv2_proto, buffer())
