@@ -136,8 +136,10 @@ def xfer_write32(dev, reg_addr, data):
     out_data = struct.pack("<%dI" % len(data), *data)
     xfer_send_only_raw(dev, out_data)
 
-
+unknown_noop = True
 def xfer_unknown_sync(dev):
+    if unknown_noop:
+        return
     cmd = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_UNKNOWN_MAYBE_SYNC]
     res = xfer_normal_input(dev, cmd, 12)
     print("magic unknownn sync returned: ", res)
