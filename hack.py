@@ -402,11 +402,45 @@ class Swopy(cmd.Cmd):
         v = get_version(self.dev)
         print(v)
 
+    def _argparse_two_ints(self, args):
+        if not args:
+            print("Parsing addr/count pair requires arguments!")
+            return
+        if args:
+            aa = args.split()
+            if len(aa) != 2:
+                print("raw read mem32 requires 2 arguments: addr count")
+                return
+            try:
+                addr = int(aa[0], base=0)
+                count = int(aa[1], base=0)
+                return (addr, count)
+            except ValueError:
+                print("addr and count both need to be integers, or convertible to integers")
+                return
+
+
     def do_raw_read_debug_reg(self, args):
         reg = int(args, base=0)
         v = xfer_read_debug(self.dev, reg)
         print("register %#x = %d (%#08x)" % (reg, v, v))
 
+    def do_raw_write_debug_reg(self, args):
+        tup = self._argparse_two_ints(args)
+        if tup:
+            v = xfer_write_debug(self.dev, tup[0], tup[1])
+            print("write debug returned: ", v)
+
+    def do_raw_read_mem32(self, args):
+        """
+        Read x bytes from address y
+        args: address
+              number of _bytes_
+        """
+        tup = self._argparse_two_ints(args)
+        if tup:
+            v = xfer_read32(self.dev, tup[0], tup[1])
+            print("read32 returned: ", v)
 
     def do_EOF(self, args):
         return self.do_exit(args)
