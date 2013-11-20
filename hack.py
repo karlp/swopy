@@ -254,37 +254,40 @@ def trace_on(dev, buff=4096, hz=2000000):
     res = xfer_normal_input(dev, cmd, 2)
     logging.debug("START TRACE (buffer= %d, hz= %d)", buff, hz)
 
-def enable_trace(dev, stim_bits=1):
+def enable_trace(dev, stim_bits=1, syncpackets=0):
+    """
+    setup and turn on trace for the given stimulus channels (default 0)
+    sync packets are turned off by default.  You'll probably want them if
+    you start doing lots of different channels and types
+    """
     logging.info("Enabling trace")
     reg = xfer_read_debug(dev, DCB_DHCSR)
     # FIXME - if this isn't ok, probably need to reset it!
 
-    #--- everything below here was originally separated by magic_sync calls?!
+    # TODO - could be |= not hard write?
     xfer_write_debug(dev, DCB_DEMCR, DCB_DEMCR_TRCENA)
-    # weird pointless read of SRAM here?!
 
     reg = xfer_read32(dev, DBGMCU_CR, 4)[0]
     reg |= DBGMCU_CR_DEBUG_TRACE_IOEN | DBGMCU_CR_DEBUG_STOP | DBGMCU_CR_DEBUG_STANDBY | DBGMCU_CR_DEBUG_SLEEP
     xfer_write32(dev, DBGMCU_CR, [reg])
 
-    xfer_write32(dev, TPIU_CSPSR, [1]) # 8bit wide data
+    # ST ref man says we set this to 1 even in async mode, it's still "one" pin wide
+    xfer_write32(dev, TPIU_CSPSR, [1]) # currently selelct parallel size register ==> 1 bit wide.
     xfer_write32(dev, TPIU_ACPR, [0xb]) # async prescalar
     trace_off(dev)
     trace_on(dev)
     xfer_write32(dev, TPIU_SPPR, [TPIU_SPPR_TXMODE_NRZ])
-    xfer_write32(dev, TPIU_FFCR, [0])
+    xfer_write32(dev, TPIU_FFCR, [0]) # Disable tpiu formatting
     xfer_write32(dev, ITM_LAR, [SCS_LAR_KEY])
     xfer_write32(dev, ITM_TCR, [((1<<16) | ITM_TCR_SYNCENA | ITM_TCR_ITMENA)])
     xfer_write32(dev, ITM_TER, [stim_bits])
     xfer_write32(dev, ITM_TPR, [stim_bits])
     # weird read of SRAM here?
-    set_dwt_sync_tap(dev, 1)
+    set_dwt_sync_tap(dev, syncpackets)
     # READ DEBUG REG 0xe000edf0 => 0x01010001
     reg = xfer_read32(dev, DCB_DHCSR, 4)[0]
     print("DCB_DHCSR == %#x" % reg)
     # fixme - again, if this isn't ok, probably need to do something, like start it running or something....
-    # get another trace or two!
-
 
 
 
