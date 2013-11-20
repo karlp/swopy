@@ -173,16 +173,23 @@ def get_voltage(dev):
 def get_mode(dev):
     res = xfer_normal_input(dev, [STLINK_GET_CURRENT_MODE], 2)[0]
     logging.debug("Get mode returned: %d", res)
+    dev._swopy_mode = res
     return res
 
-def leave_state(dev, current):
+def leave_state(dev):
     cmd = None
+    current = -1
+    if hasattr(dev, "_swopy_mode"):
+        current = dev._swopy_mode
+    logging.debug("CUrrent saved mode is %d" %  current)
     if current == STLINK_MODE_DFU:
         logging.debug("Leaving dfu mode")
         cmd = [STLINK_DFU_COMMAND, STLINK_DFU_EXIT]
+        dev._swopy_mode = 1 # "exit dfu" moves from mode 0 -> mode 1
     elif current == STLINK_MODE_DEBUG:
         logging.debug("Leaving debug mode")
         cmd = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_EXIT]
+        dev._swopy_mode = 1 # exit debug goes from mode 2 -> mode 1
 
     if cmd:
         xfer_normal_input(dev, cmd, 0)
@@ -195,12 +202,7 @@ def enter_state_debug(dev):
     logging.debug("enter debug state returned: %s", res)
     # res[0] should be 0x80
     assert res[0] == 0x80, "enter state failed :("
-
-def exit_debug_mode(dev):
-    logging.debug("Switching out of debug mode...")
-    ## FIXME - send the 0xf2 21
-    xfer_send_only_raw(dev, [STLINK_DEBUG_COMMAND, STLINK_DEBUG_EXIT])
-
+    dev._swopy_mode = 2
 
 def reset(dev):
     cmd = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_RESETSYS]
@@ -319,25 +321,6 @@ def trace_read(dev, count):
     #print("trace read Received: ", res)
     return res
 
-# Can't be run in DFU mode!
-# print("Status is: ", status(dev))
-def _hacky_init():
-    dev = find_stlink()
-    s = get_mode(dev)
-    leave_state(dev, s)
-    v = get_version(dev)
-    print(v)
-    s = get_mode(dev)
-    leave_state(dev, s)
-
-    if v.jtag_ver >= 13:
-        volts = get_voltage(dev)
-        print("Voltage: ", volts)
-
-    enter_state_debug(dev)
-    print("Status is: ", status(dev))
-
-
 class Swopy(cmd.Cmd):
     def __init__(self):
         cmd.Cmd.__init__(self)
@@ -350,7 +333,8 @@ class Swopy(cmd.Cmd):
                 x = int(args, base=0)
                 stimbits = x
             except ValueError:
-                print("Ignoring invalid stim bits")
+                print("Invalid stim bits: %s" % (args))
+                return
 
         enable_trace(self.dev, stimbits)
 
@@ -382,8 +366,8 @@ class Swopy(cmd.Cmd):
         dev = self.dev
         v = get_version(dev)
         print(v)
-        s = get_mode(dev)
-        leave_state(dev, s)
+        get_mode(dev)
+        leave_state(dev)
 
         if v.jtag_ver >= 13:
             volts = get_voltage(dev)
@@ -392,11 +376,8 @@ class Swopy(cmd.Cmd):
         enter_state_debug(dev)
         print("Status is: ", status(dev))
 
-    def do_quit(self, args):
-        return True
-
     def do_disconnect(self, args):
-        exit_debug_mode(self.dev)
+        leave_state(self.dev)
 
 
     def do_run(self, args):
@@ -404,17 +385,15 @@ class Swopy(cmd.Cmd):
         """
         run(self.dev)
 
-    def do_idle(self, args):
-        """do stupid shit like stlink, send a sync command"""
-        xfer_unknown_sync(self.dev)
+    def do_enter_debug(self, args):
+        enter_state_debug(self.dev)
 
     def do_mode(self, args):
         s = get_mode(self.dev)
         print("State is %#x" % s)
 
     def do_leave_state(self, args):
-        #s = get_mode(self.dev)
-        leave_state(self.dev, int(args))
+        leave_state(self.dev)
 
     def do_version(self, args):
         v = get_version(self.dev)
@@ -425,15 +404,29 @@ class Swopy(cmd.Cmd):
         v = xfer_read_debug(self.dev, reg)
         print("register %#x = %d (%#08x)" % (reg, v, v))
 
-    def close(self):
-        exit_debug_mode(self.dev)
 
+    def do_EOF(self, args):
+        return self.do_exit(args)
+
+    def do_exit(self, args):
+        leave_state(self.dev)
+        s = get_mode(self.dev)
+        print("Disconnected with state in %d" % s)
+        return True
+
+    def cmdloop(self):
+        while True:
+            try:
+                cmd.Cmd.cmdloop(self)
+            except KeyboardInterrupt:
+                print(' - interrupted')
+                continue
+            break
 
 
 if __name__ == "__main__":
     p = Swopy()
     p.cmdloop()
-    p.close()
 
 
 
