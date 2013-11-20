@@ -330,6 +330,9 @@ class Swopy(cmd.Cmd):
         self.dev = find_stlink()
 
     def do_swo_start(self, args):
+        """swo_start [stimulus port bitmask]
+        stimbits defaults to 1, => stimulus port 0
+        """
         stimbits = 1
         if args:
             try:
@@ -432,10 +435,9 @@ class Swopy(cmd.Cmd):
             print("write debug returned: ", v)
 
     def do_raw_read_mem32(self, args):
-        """
-        Read x bytes from address y
-        args: address
-              number of _bytes_
+        """raw_read_mem32 <address> <bytecount>
+        Read bytecount bytes from address.
+        bytecount probably has to be a multiple of 4, but hasn't been extensively tested.
         """
         tup = self._argparse_two_ints(args)
         if tup:
