@@ -113,13 +113,13 @@ def InsaneVerbosePacketReceiver():
         print("Got frame: %s" % frame)
 
 @coroutine
-def PacketReceiverConsolePrinter(valid_address=0):
+def PacketReceiverConsolePrinter(valid_address=-1):
     while True:
         f = yield
         if not hasattr(f, "address"):
             # Skip things like synchro packets
             continue
-        if f.address == valid_address or valid_address == 0:
+        if f.address == valid_address or valid_address == -1:
             try:
                 print(chr(f.data), end='')
             except ValueError:
@@ -150,9 +150,10 @@ def demodemo():
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument('file', type=argparse.FileType('rb', 0), help="swo binary output file to parse", default="-")
+    ap.add_argument("--address", "-a", type=int, default=-1, help="which channels to print, -1 for all")
     opts = ap.parse_args()
 
-    parser = PacketParser(target=PacketReceiverConsolePrinter(0))
+    parser = PacketParser(target=PacketReceiverConsolePrinter(opts.address))
 
     with opts.file:
         while True:
