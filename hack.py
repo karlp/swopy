@@ -1,12 +1,15 @@
 __author__ = 'karlp'
 
-import time
+import cmd
 import logging
 import struct
 import sys
-import cmd
+import threading
+import time
+
 import usb.core
 import usb.util
+
 from magic import *
 
 logging.basicConfig(level=logging.DEBUG)
@@ -324,10 +327,39 @@ def trace_read(dev, count):
     #print("trace read Received: ", res)
     return res
 
+class SwopyDataWriter(threading.Thread):
+    """
+    Handles reading and writing to a file of usb swo data
+    """
+    def __init__(self, dev, lock, filename):
+        threading.Thread.__init__(self)
+        self.l = logging.getLogger(__name__)
+        self.dev = dev
+        self.LOCK_DEV = lock
+        self.fn = filename
+        self.should_run = True
+
+    def run(self):
+        with open(self.fn, "ab", 0) as f:
+            while self.should_run:
+                qq = None
+                if self.LOCK_DEV.acquire(1):
+                    x = trace_bytes_available(self.dev)
+                    if x:
+                        qq = trace_read(self.dev, x)
+                    self.LOCK_DEV.release()
+                    if qq:
+                        f.write(qq)
+                time.sleep(0.25) # might need tweaking for high speed dumping?
+        self.l.info("Finished with swo writing")
+
+
 class Swopy(cmd.Cmd):
     def __init__(self):
         cmd.Cmd.__init__(self)
         self.dev = find_stlink()
+        self.LOCK_DEV = threading.Lock()
+        self.l = logging.getLogger(__name__)
 
     def do_swo_start(self, args):
         """swo_start [stimulus port bitmask]
@@ -341,13 +373,31 @@ class Swopy(cmd.Cmd):
             except ValueError:
                 print("Invalid stim bits: %s" % (args))
                 return
-
-        enable_trace(self.dev, stimbits)
+        if self.LOCK_DEV.acquire(1):
+            enable_trace(self.dev, stimbits)
+            self.LOCK_DEV.release()
 
     def do_swo_stop(self, args):
-        trace_off(self.dev)
+        if self.LOCK_DEV.acquire(1):
+            trace_off(self.dev)
+            self.LOCK_DEV.release()
+        # TODO - possibly do a few extra SWO reads here?
+        if self._swo_thread:
+            print("Stopping worker thread")
+            self._swo_thread.should_run = False
+            self._swo_thread.join()
 
-    def do_swo_read(self, args):
+    def do_swo_file(self, args):
+        """swo_file <filename>
+        Start a background thread that continually reads the SWO data and writes
+        it out to a file, as is
+        """
+        self._swo_thread = SwopyDataWriter(self.dev, self.LOCK_DEV, args)
+        self._swo_thread.start()
+
+
+
+    def do_swo_read_raw(self, args):
         """
         attempt to read from the swo endpoint, x times
         """
@@ -360,31 +410,31 @@ class Swopy(cmd.Cmd):
                 print("Ignoring invalid count of swo reads to attempt")
 
         for i in range(count):
-            x = trace_bytes_available(self.dev)
-            if x:
-                qq = trace_read(self.dev, x)
-                print("got trace bytes (raw)", qq)
-                print("trace bytes as chars: ", [chr(x) for x in qq])
+            if self.LOCK_DEV.acquire(1):
+                x = trace_bytes_available(self.dev)
+                if x:
+                    qq = trace_read(self.dev, x)
+                    print("got trace bytes (raw)", qq)
+                    print("trace bytes as chars: ", [chr(x) for x in qq])
+                self.LOCK_DEV.release()
 
 
     def do_connect(self, args):
         """Connect to the target"""
         dev = self.dev
-        v = get_version(dev)
-        print(v)
-        get_mode(dev)
-        leave_state(dev)
+        if self.LOCK_DEV.acquire(1):
+            v = get_version(dev)
+            print(v)
+            get_mode(dev)
+            leave_state(dev)
 
-        if v.jtag_ver >= 13:
-            volts = get_voltage(dev)
-            print("Voltage: ", volts)
+            if v.jtag_ver >= 13:
+                volts = get_voltage(dev)
+                print("Voltage: ", volts)
 
-        enter_state_debug(dev)
-        print("Status is: ", status(dev))
-
-    def do_disconnect(self, args):
-        leave_state(self.dev)
-
+            enter_state_debug(dev)
+            print("status is: ", status(dev))
+            self.LOCK_DEV.release()
 
     def do_run(self, args):
         """ Attempt to start the processor (THIS IS BSUTED?!
@@ -392,18 +442,26 @@ class Swopy(cmd.Cmd):
         run(self.dev)
 
     def do_enter_debug(self, args):
-        enter_state_debug(self.dev)
+        if self.LOCK_DEV.acquire(1):
+            enter_state_debug(self.dev)
+            self.LOCK_DEV.release()
 
     def do_mode(self, args):
-        s = get_mode(self.dev)
-        print("State is %#x" % s)
+        if self.LOCK_DEV.acquire(1):
+            s = get_mode(self.dev)
+            self.LOCK_DEV.release()
+            print("State is %#x" % s)
 
     def do_leave_state(self, args):
-        leave_state(self.dev)
+        if self.LOCK_DEV.acquire(1):
+            leave_state(self.dev)
+            self.LOCK_DEV.release()
 
     def do_version(self, args):
-        v = get_version(self.dev)
-        print(v)
+        if self.LOCK_DEV.acquire(1):
+            v = get_version(self.dev)
+            self.LOCK_DEV.release()
+            print(v)
 
     def _argparse_two_ints(self, args):
         if not args:
@@ -425,14 +483,18 @@ class Swopy(cmd.Cmd):
 
     def do_raw_read_debug_reg(self, args):
         reg = int(args, base=0)
-        v = xfer_read_debug(self.dev, reg)
-        print("register %#x = %d (%#08x)" % (reg, v, v))
+        if self.LOCK_DEV.acquire(1):
+            v = xfer_read_debug(self.dev, reg)
+            self.LOCK_DEV.release()
+            print("register %#x = %d (%#08x)" % (reg, v, v))
 
     def do_raw_write_debug_reg(self, args):
         tup = self._argparse_two_ints(args)
         if tup:
-            v = xfer_write_debug(self.dev, tup[0], tup[1])
-            print("write debug returned: ", v)
+            if self.LOCK_DEV.acquire(1):
+                v = xfer_write_debug(self.dev, tup[0], tup[1])
+                self.LOCK_DEV.release()
+                print("write debug returned: ", v)
 
     def do_raw_read_mem32(self, args):
         """raw_read_mem32 <address> <bytecount>
@@ -441,13 +503,16 @@ class Swopy(cmd.Cmd):
         """
         tup = self._argparse_two_ints(args)
         if tup:
-            v = xfer_read32(self.dev, tup[0], tup[1])
-            print("read32 returned: ", v)
+            if self.LOCK_DEV.acquire(1):
+                v = xfer_read32(self.dev, tup[0], tup[1])
+                self.LOCK_DEV.release()
+                print("read32 returned: ", v)
 
     def do_EOF(self, args):
         return self.do_exit(args)
 
     def do_exit(self, args):
+        self.do_swo_stop(args)
         leave_state(self.dev)
         s = get_mode(self.dev)
         print("Disconnected with state in %d" % s)
@@ -456,7 +521,10 @@ class Swopy(cmd.Cmd):
     def cmdloop(self):
         while True:
             try:
+                # FIXME Or, you know, could I just lock here?
+                # Might get in the way of the thread needing the lock to cleanup or anything?
                 cmd.Cmd.cmdloop(self)
+                # release here?
             except KeyboardInterrupt:
                 print(' - interrupted')
                 continue
