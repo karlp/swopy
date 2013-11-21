@@ -121,7 +121,10 @@ def PacketReceiverConsolePrinter(valid_address=-1):
             # Skip things like synchro packets
             continue
         if f.address == valid_address or valid_address == -1:
-            print(chr(f.data), end='')
+            if (f.size == 1):
+                print(chr(f.data), end='')
+            else:
+                print("Channel %d: %d byte value: %d (%#x)" % (f.address, f.size, f.data, f.data))
 
 
 
