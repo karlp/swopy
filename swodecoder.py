@@ -158,6 +158,6 @@ if __name__ == "__main__":
 
     with opts.file:
         b = opts.file.read(1)
-        while b:
+        while len(b):
             parser.send(ord(b))
             b = opts.file.read(1)
