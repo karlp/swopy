@@ -2,3 +2,23 @@ hacking on a stlink swo usb capture tool
 
 heh ;) it works :)
 
+python hack.py
+connect
+swo_file <blah blah blah>
+swo_start stimulusbitmask
+....
+swo_start otherstimulusmask
+...
+exit (or ^d)
+
+
+in another window:
+
+# to see everything...
+tail -f <blah blah blah | python swodecoder.py -
+
+# to see just stimulus port 2
+tail -f <blah blah blah | python swodecoder.py - -a 2
+
+
+
