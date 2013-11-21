@@ -55,13 +55,15 @@ def PacketParser(target, skip_to_sync=True):
         frame = []
         while not in_sync:
             b = (yield)
-            if b != 0:
-                if (len(frame) == 5) and (b == 0x80):
+            if b == 0:
+                frame.append(b)
+            else:
+                if b == 0x80 and (len(frame) == 5):
                     frame.append(b)
                 else:
-                    print("not in sync, skipping non zero", b)
-            else:
-                frame.append(b)
+                    print("Not in sync: invalid byte for sync frame: %d" % b)
+                    frame = []
+
             #print("Frame so far", frame)
             if frame == synchro:
                 in_sync = True
@@ -73,13 +75,21 @@ def PacketParser(target, skip_to_sync=True):
             fin = False
             frame = []
             while not fin:
-                if ((b == 0) or ((len(frame) == 5) and (b == 0x80))):
+                if (b == 0):
                     frame.append(b)
+                else:
+                    if b == 0x80 and (len(frame) == 5):
+                        frame.append(b)
+                    else:
+                        print("invalid sync frame byte? trying to resync: %d" % b)
+                        frame = []
                 if frame == synchro:
                     target.send(SynchroPacket())
                     fin = True
                 else:
                     b = yield
+
+                #print("Frame2 so far", frame)
 
         elif ((b & 0x3) == 0):
             if b == 0x70:
