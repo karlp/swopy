@@ -157,5 +157,7 @@ if __name__ == "__main__":
     parser = PacketParser(target=PacketReceiverConsolePrinter(opts.address))
 
     with opts.file:
-        while True:
-            parser.send(ord(opts.file.read(1)))
+        b = opts.file.read(1)
+        while b:
+            parser.send(ord(b))
+            b = opts.file.read(1)
