@@ -78,7 +78,8 @@ def PacketParser(target, skip_to_sync=True):
                 if frame == synchro:
                     target.send(SynchroPacket())
                     fin = True
-                b = yield
+                else:
+                    b = yield
 
         elif ((b & 0x3) == 0):
             if b == 0x70:
@@ -120,10 +121,7 @@ def PacketReceiverConsolePrinter(valid_address=-1):
             # Skip things like synchro packets
             continue
         if f.address == valid_address or valid_address == -1:
-            try:
-                print(chr(f.data), end='')
-            except ValueError:
-                print("?", end='')
+            print(chr(f.data), end='')
 
 
 
