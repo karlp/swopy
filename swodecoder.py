@@ -97,7 +97,7 @@ def PacketParser(target, skip_to_sync=True):
                 print("Overflow!")
                 target.send(OverflowPacket())
             else:
-                print("Protocol packet decoding not handled, breaking stream to next sync :(")
+                print("Protocol packet decoding not handled, breaking stream to next sync :( byte was: %d (%x)" % (b, b))
                 in_sync = False
         else:
             address = (b & 0xf8) >> 3
@@ -135,7 +135,7 @@ def PacketReceiverConsolePrinter(valid_address=-1):
             if (f.size == 1):
                 print(chr(f.data), end='')
             else:
-                print("Channel %d: %d byte value: %d (%#x)" % (f.address, f.size, f.data, f.data))
+                print("Channel %d: %d byte value: %d : %#x" % (f.address, f.size, f.data, f.data))
 
 
 
