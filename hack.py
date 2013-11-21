@@ -257,11 +257,14 @@ def trace_on(dev, buff=4096, hz=2000000):
     res = xfer_normal_input(dev, cmd, 2)
     logging.debug("START TRACE (buffer= %d, hz= %d)", buff, hz)
 
-def enable_trace(dev, stim_bits=1, syncpackets=3):
+def enable_trace(dev, stim_bits=1, syncpackets=3, cpu_hz=24000000):
     """
     setup and turn on trace for the given stimulus channels (default 0)
-    sync packets are turned off by default.  You'll probably want them if
-    you start doing lots of different channels and types
+    sync packets are turned on, but as slow as possible by default.
+    You'll probably want them if you start doing lots of different
+    channels and types, but arm says,
+        "If a system is using an asynchronous serial trace port, ARM recommends it
+        disables Synchronization packets to reduce the data stream bandwidth."
     """
     logging.info("Enabling trace")
     reg = xfer_read_debug(dev, DCB_DHCSR)
@@ -276,7 +279,10 @@ def enable_trace(dev, stim_bits=1, syncpackets=3):
 
     # ST ref man says we set this to 1 even in async mode, it's still "one" pin wide
     xfer_write32(dev, TPIU_CSPSR, [1]) # currently selelct parallel size register ==> 1 bit wide.
-    xfer_write32(dev, TPIU_ACPR, [0xb]) # async prescalar
+    # stm32 has traceclk directly to hclk, but swo clock can not be greater than 2Mhz
+    # I tried 4 Mhz, and it's garbled, no real reason to believe it can do better
+    prescaler = (cpu_hz / 2000000) - 1
+    xfer_write32(dev, TPIU_ACPR, [prescaler]) # async prescalar
     trace_off(dev)
     trace_on(dev)
     xfer_write32(dev, TPIU_SPPR, [TPIU_SPPR_TXMODE_NRZ])
