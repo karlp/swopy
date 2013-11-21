@@ -1,6 +1,7 @@
 #!/usr/bin/env
 from __future__ import print_function
 import argparse
+import time
 import io
 import sys
 import struct
@@ -162,12 +163,22 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument('file', type=argparse.FileType('rb', 0), help="swo binary output file to parse", default="-")
     ap.add_argument("--address", "-a", type=int, default=-1, help="which channels to print, -1 for all")
+    ap.add_argument("--follow", "-f", action="store_true", help="Seek to the 1024 bytes before the end of file first!", default=False)
     opts = ap.parse_args()
 
     parser = PacketParser(target=PacketReceiverConsolePrinter(opts.address))
 
     with opts.file:
-        b = opts.file.read(1)
-        while len(b):
-            parser.send(ord(b))
-            b = opts.file.read(1)
+        print("file pos = ", opts.file.tell())
+        if opts.follow:
+            print("Seeking to end of file!")
+            opts.file.seek(-1024, 2)
+        bb = opts.file.read(1024)
+
+        while True:
+            print("file pos = ", opts.file.tell())
+            if len(bb):
+                [parser.send(ord(b)) for b in bb]
+            else:
+                time.sleep(0.5)
+            bb = opts.file.read(1024)
