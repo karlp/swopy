@@ -364,6 +364,7 @@ class Swopy(cmd.Cmd):
     def __init__(self):
         cmd.Cmd.__init__(self)
         self.dev = find_stlink()
+        self._swo_thread = None
         self.LOCK_DEV = threading.Lock()
         self.l = logging.getLogger(__name__)
 
