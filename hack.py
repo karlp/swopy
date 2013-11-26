@@ -246,7 +246,7 @@ def trace_off(dev):
     res = xfer_normal_input(dev, cmd, 2)
     logging.debug("STOP TRACE")
 
-def trace_on(dev, buff=4096, hz=2000000):
+def trace_on(dev, buff=2048, hz=2000000):
     cmd = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_APIV2_START_TRACE_RX]
     args = [ord(q) for q in struct.pack("<HI", buff, hz)]
     cmd.extend(args)
