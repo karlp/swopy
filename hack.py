@@ -355,7 +355,8 @@ class SwopyDataWriter(threading.Thread):
                         qq = trace_read(self.dev, x)
                     self.LOCK_DEV.release()
                     if qq:
-                        f.write(qq)
+                        written = f.write(qq)
+                        logging.debug("Wrote %d/%d trace bytes to file: %s", written, qq, f)
                 time.sleep(0.25) # might need tweaking for high speed dumping?
         self.l.info("Finished with swo writing")
 

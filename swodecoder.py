@@ -50,28 +50,33 @@ def PacketParser(target, skip_to_sync=True):
     Process data arriving in chunks, and successively yield parsed ITM/DWT packets
     """
     synchro = [0,0,0,0,0,0x80]
+    _bc = 0
+
 
     in_sync = False
     while True:
         frame = []
         while not in_sync:
             b = (yield)
+            _bc += 1
             if b == 0:
                 frame.append(b)
             else:
-                if b == 0x80 and (len(frame) == 5):
+                if b == 0x80 and (len(frame) >= 5):
                     frame.append(b)
                 else:
-                    print("Not in sync: invalid byte for sync frame: %d" % b)
+                    print("Not in sync: invalid byte for sync frame: offset=%d (%#x) %d (%#x)" % (_bc, _bc, b, b))
                     frame = []
 
-            #print("Frame so far", frame)
-            if frame == synchro:
+            print("Frame so far", frame)
+            # Allow longer runs of zeros, as long as they end up as a sync
+            if frame[-6:] == synchro:
                 in_sync = True
                 target.send(SynchroPacket())
 
         # Ok, we're in sync now, need to be prepared for anything at all...
         b = yield
+        _bc += 1
         if b == 0:
             fin = False
             frame = []
@@ -82,22 +87,23 @@ def PacketParser(target, skip_to_sync=True):
                     if b == 0x80 and (len(frame) == 5):
                         frame.append(b)
                     else:
-                        print("invalid sync frame byte? trying to resync: %d" % b)
-                        frame = []
+                        #print("invalid sync frame byte? trying to resync: %d" % b)
+                        print("invalid sync frame byte? pretending it didn't happen offset: %d(%#x) %d (%#x), frame was %s" % (_bc, _bc, b, b, frame))
+                        fin = True
                 if frame == synchro:
                     target.send(SynchroPacket())
                     fin = True
                 else:
                     b = yield
-
-                #print("Frame2 so far", frame)
+                    _bc += 1
+                print("Frame2 so far", frame)
 
         elif ((b & 0x3) == 0):
             if b == 0x70:
                 print("Overflow!")
                 target.send(OverflowPacket())
             else:
-                print("Protocol packet decoding not handled, breaking stream to next sync :( byte was: %d (%x)" % (b, b))
+                print("Protocol packet decoding not handled, breaking stream to next sync offset=%d (%#x) :( byte was: %d (%x)" % (_bc, _bc, b, b))
                 in_sync = False
         else:
             address = (b & 0xf8) >> 3
@@ -107,6 +113,7 @@ def PacketParser(target, skip_to_sync=True):
             data = []
             for x in range(rlen):
                 b = yield
+                _bc += 1
                 data.append(b)
             ss = SourcePacket(address, source, rlen, data)
             target.send(ss)
@@ -130,12 +137,16 @@ def PacketReceiverConsolePrinter(valid_address=-1):
         f = yield
         if not hasattr(f, "address"):
             # Skip things like synchro packets
+            print(f)
             continue
         if f.address == valid_address or valid_address == -1:
+            print(f)
+            """
             if (f.size == 1):
                 print(chr(f.data), end='')
             else:
                 print("Channel %d: %d byte value: %d : %#x" % (f.address, f.size, f.data, f.data))
+            """
 
 
 
