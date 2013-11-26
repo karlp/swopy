@@ -180,5 +180,10 @@ if __name__ == "__main__":
             if len(bb):
                 [parser.send(ord(b)) for b in bb]
             else:
-                time.sleep(0.5)
+                if opts.follow:
+                    time.sleep(0.5)
+                else:
+                    print("# All finished!")
+                    break
+
             bb = opts.file.read(1024)
