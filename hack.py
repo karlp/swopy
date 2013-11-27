@@ -356,7 +356,11 @@ class SwopyDataWriter(threading.Thread):
                     self.LOCK_DEV.release()
                     if qq:
                         f.write(qq)
-                time.sleep(0.25) # might need tweaking for high speed dumping?
+                        logging.debug("Wrote %d trace bytes to file: %s", len(qq), f.name)
+                    if x:
+                        time.sleep(0.01) # try and stay on top of things, without pegging the cpu!
+                    else:
+                        time.sleep(0.25) # no data, no hurry to check again really
         self.l.info("Finished with swo writing")
 
 
