@@ -449,6 +449,7 @@ class Swopy(cmd.Cmd):
 
     def do_run(self, args):
         """ Attempt to start the processor (THIS IS BSUTED?!
+        Worked when it was halted after leaving oocd/gdb?
         """
         run(self.dev)
 
