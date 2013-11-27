@@ -325,6 +325,22 @@ def trace_bytes_available(dev):
     cmd = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_APIV2_GET_TRACE_NB]
     res = xfer_normal_input(dev, cmd, 2, verbose=False)
     bytes = struct.unpack_from("<H", lame_py(bytearray(res)))[0]
+    # FIXME -occasionally, this returns a huge number!
+    """
+    DEBUG:root:reading 750 bytes of trace buffer
+DEBUG:root:Wrote 750 trace bytes to file: nov279.log
+DEBUG:root:reading 435 bytes of trace buffer
+DEBUG:root:Wrote 435 trace bytes to file: nov279.log
+DEBUG:root:reading 420 bytes of trace buffer
+DEBUG:root:Wrote 420 trace bytes to file: nov279.log
+DEBUG:root:reading 63931 bytes of trace buffer
+Exception in thread Thread-1:
+   we get a timeout here, from trying to read such a big number :(
+   We send it 4096, but it never reads more than 2048.
+   when I sent 2048, it never read more than 1024?
+   Could be worth experimenting with sub sniffing and windows stlink to see what else is up?
+   Seems odd that the max output is half what we send in?
+"""
     return bytes
 
 def trace_read(dev, count):
