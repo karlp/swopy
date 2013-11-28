@@ -118,6 +118,17 @@ def xfer_write_debug(dev, reg_addr, val):
     res = xfer_normal_input(dev, cmd, 2)
     logging.debug("WRITE DEBUG %#x ==> %d (%#08x) (res=%s)", reg_addr, val, val, res)
     #assert res ==
+    # Sometimes this fails:
+    """
+    (Cmd) raw_write_debug_reg 0x2000000 1
+DEBUG:root:WRITE DEBUG 0x2000000 ==> 1 (0x000001) (res=array('B', [25, 0]))
+('write debug returned: ', None)
+(Cmd) raw_write_debug_reg 0x2000000 1
+DEBUG:root:WRITE DEBUG 0x2000000 ==> 1 (0x000001) (res=array('B', [17, 0]))
+('write debug returned: ', None)
+(Cmd) raw_read_mem32 0x20000000 4
+DEBUG:root:READMEM32 0x20000000/4 returned: ['0x3']
+"""
 
 def xfer_read_debug(dev, reg_addr):
     cmd = [STLINK_DEBUG_COMMAND, STLINK_DEBUG_APIV2_READDEBUGREG]
@@ -126,7 +137,9 @@ def xfer_read_debug(dev, reg_addr):
     res = xfer_normal_input(dev, cmd, 8)
     status, unknown, val = struct.unpack_from("<HHI", lame_py(bytearray(res)))
     logging.debug("READ DEBUG: %#x ==> %d (%#08x) status=%#x, unknown=%#x", reg_addr, val, val, status, unknown)
-    assert status == 0x80, "failed to read debug reg?!"
+    #assert status == 0x80, "failed to read debug reg?!"
+    # yuck, sometimes status is 0x15 or 0x25 and it shows garbage. not sure what it means though?
+    # do I need to send the sync shit?
     return val
 
 
@@ -535,6 +548,15 @@ class Swopy(cmd.Cmd):
                 v = xfer_read32(self.dev, tup[0], tup[1])
                 self.LOCK_DEV.release()
                 print("read32 returned: ", v)
+
+    def do_raw_write_mem32(self, args):
+        """uses write mem32 instead of write debug, but still only 1 word writes please!"""
+        tup = self._argparse_two_ints(args)
+        if tup:
+            if self.LOCK_DEV.acquire(1):
+                v = xfer_write32(self.dev, tup[0], [tup[1]])
+                self.LOCK_DEV.release()
+                print("write32 returned", v)
 
     def do_EOF(self, args):
         return self.do_exit(args)
