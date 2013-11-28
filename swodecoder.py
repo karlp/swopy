@@ -25,9 +25,13 @@ class SourcePacket(ITMDWTPacket):
         if size == 1:
             self.data = data[0]
         elif size == 2:
-            self.data = struct.unpack_from("<H", bytearray(data))[0]
+            d = bytearray(data)
+            self.data = struct.unpack_from("<H", d)[0]
+            self.sdata = struct.unpack_from("<h", d)[0]
         elif size == 4:
-            self.data = struct.unpack_from("<I", bytearray(data))[0]
+            d = bytearray(data)
+            self.data = struct.unpack_from("<I", d)[0]
+            self.sdata = struct.unpack_from("<i", d)[0]
 
     def __repr__(self):
         if self.size == 1:
@@ -135,7 +139,7 @@ def PacketReceiverConsolePrinter(valid_address=-1):
             if (f.size == 1):
                 print(chr(f.data), end='')
             else:
-                print("Channel %d: %d byte value: %d : %#x" % (f.address, f.size, f.data, f.data))
+                print("Channel %d: %d byte value: %d : %#x : %d" % (f.address, f.size, f.data, f.data, f.sdata))
 
 
 
