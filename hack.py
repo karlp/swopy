@@ -116,7 +116,7 @@ def xfer_write_debug(dev, reg_addr, val):
     args = [ord(q) for q in struct.pack("<II", reg_addr, val)]
     cmd.extend(args)
     res = xfer_normal_input(dev, cmd, 2)
-    logging.debug("WRITE DEBUG %#x ==> %d (%#08x)", reg_addr, val, val)
+    logging.debug("WRITE DEBUG %#x ==> %d (%#08x) (res=%s)", reg_addr, val, val, res)
     #assert res ==
 
 def xfer_read_debug(dev, reg_addr):
@@ -125,7 +125,7 @@ def xfer_read_debug(dev, reg_addr):
     cmd.extend(args)
     res = xfer_normal_input(dev, cmd, 8)
     status, unknown, val = struct.unpack_from("<HHI", lame_py(bytearray(res)))
-    logging.debug("READ DEBUG: %#x ==> %d (%#08x)", reg_addr, val, val)
+    logging.debug("READ DEBUG: %#x ==> %d (%#08x) status=%#x, unknown=%#x", reg_addr, val, val, status, unknown)
     assert status == 0x80, "failed to read debug reg?!"
     return val
 
@@ -266,7 +266,7 @@ def enable_trace(dev, stim_bits=1, syncpackets=3, cpu_hz=24000000):
         "If a system is using an asynchronous serial trace port, ARM recommends it
         disables Synchronization packets to reduce the data stream bandwidth."
     """
-    logging.info("Enabling trace")
+    logging.info("Enabling trace for stimbits %#x (%s)", stim_bits, bin(stim_bits))
     reg = xfer_read_debug(dev, DCB_DHCSR)
     # FIXME - if this isn't ok, probably need to reset it!
 
