@@ -165,7 +165,7 @@ def xfer_write32(dev, reg_addr, data):
     xfer_send_only_raw(dev, out_data)
     logging.debug("WRITEMEM32 %#x/%d ==> %s", reg_addr, dlen, [hex(i) for i in data])
 
-unknown_noop = True
+unknown_noop = False
 def xfer_unknown_sync(dev):
     if unknown_noop:
         return
@@ -557,6 +557,14 @@ class Swopy(cmd.Cmd):
                 v = xfer_write32(self.dev, tup[0], [tup[1]])
                 self.LOCK_DEV.release()
                 print("write32 returned", v)
+
+    def do_magic_sync(self, args):
+        """Send the unknown magic sync frame. helps for ???"""
+        if self.LOCK_DEV.acquire(1):
+            xfer_unknown_sync(self.dev)
+            self.LOCK_DEV.release()
+            print("unknown magic sync sent")
+
 
     def do_EOF(self, args):
         return self.do_exit(args)
