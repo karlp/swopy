@@ -1,4 +1,8 @@
-__author__ = 'karlp'
+#!/usr/bin/env python
+# Karl Palsson, November 2013
+# This tool is for capturing SWO output from a STLinkv2
+# Released under your choice of the BSD 2 Clause, Apache 2.0,
+# MIT, or ISC Licenses.
 
 import cmd
 import logging
@@ -11,6 +15,8 @@ import usb.core
 import usb.util
 
 from magic import *
+
+DEFAULT_CPU_HZ = 24000000
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -270,7 +276,7 @@ def trace_on(dev, buff=4096, hz=2000000):
     res = xfer_normal_input(dev, cmd, 2)
     logging.debug("START TRACE (buffer= %d, hz= %d)", buff, hz)
 
-def enable_trace(dev, stim_bits=1, syncpackets=1, cpu_hz=24000000):
+def enable_trace(dev, stim_bits=1, syncpackets=1, cpu_hz=DEFAULT_CPU_HZ):
     """
     setup and turn on trace for the given stimulus channels (default 0)
     sync packets are turned on, but as slow as possible by default.
@@ -303,6 +309,7 @@ def enable_trace(dev, stim_bits=1, syncpackets=1, cpu_hz=24000000):
     xfer_write32(dev, ITM_LAR, [SCS_LAR_KEY])
     xfer_write32(dev, ITM_TCR, [((1<<16) | ITM_TCR_SYNCENA | ITM_TCR_ITMENA)])
     xfer_write32(dev, ITM_TER, [stim_bits])
+    # Not entirely convinced it's our place to edit the privilege register
     xfer_write32(dev, ITM_TPR, [stim_bits])
     # weird read of SRAM here?
     set_dwt_sync_tap(dev, syncpackets)
@@ -468,6 +475,7 @@ class Swopy(cmd.Cmd):
             get_mode(dev)
             leave_state(dev)
 
+            # OOCD claims this version, but no idea where it comes from, or how valid it is.
             if v.jtag_ver >= 13:
                 volts = get_voltage(dev)
                 print("Voltage: ", volts)
