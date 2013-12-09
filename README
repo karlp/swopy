@@ -1,10 +1,18 @@
-hacking on a stlink swo usb capture tool
+stlink swo usb capture tool
 
 heh ;) it works :)
 
+Dependencies
+============
+pyusb >= 1.x  (Tested with 1.0.0-0.4.a2.fc18)
+(you have to work out udev rules yourself....)
+
+Basic Usage
+===========
+
 python hack.py
 connect
-swo_file <blah blah blah>
+swo_file blahblahblah.log
 swo_start stimulusbitmask
 ....
 swo_start otherstimulusmask
@@ -15,10 +23,27 @@ exit (or ^d)
 in another window:
 
 # to see everything...
-tail -f <blah blah blah | python swodecoder.py -
+python swodecoder.py -f blahblahblah.log
 
 # to see just stimulus port 2
-tail -f <blah blah blah | python swodecoder.py - -a 2
+python swodecoder.py -f blahblahblah.log -a 2
 
 
+Tips
+====
+You _probably_ will want to edit swodecoder.py, in the PacketParser's
+target parameter, if you want to change the output formatting.
 
+Bugs
+====
+The STLink firmware gets into some screwy states sometimes, you need to
+unplug/replug to get it back.  Boo :( (This is a bug in swopy's USB handling)
+
+After streaming for a while, stably writing 40-60KB/sec, and seeing consistent
+300-800bytes SWO data per frame, you'll see the STLink report that it has ~64KB
+to dump, and then it gets a USB Transfer error and locks up.  Boo :(  As best I
+can tell that's a firmware bug on the STLink, there's no field I can tell in
+the USB responses to indicate there's any sort of overflow)
+
+Sometimes the stimulus bits are weird.  Writing to bits that _should_ turn on
+the channel you want doesn't.  Boo :( No idea what's going on there.
