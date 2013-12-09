@@ -3,6 +3,7 @@ from __future__ import print_function
 import argparse
 import time
 import io
+import os
 import sys
 import struct
 
@@ -175,8 +176,13 @@ if __name__ == "__main__":
     with opts.file:
         print("file pos = ", opts.file.tell())
         if opts.follow:
-            print("Seeking to end of file!")
-            opts.file.seek(-1024, 2)
+            opts.file.seek(0, os.SEEK_END)
+            size = opts.file.tell()
+            if size > 1024:
+                print("Jumping to the near the end")
+                opts.file.seek(-1024, os.SEEK_END)
+            else:
+                opts.file.seek(0)
         bb = opts.file.read(1024)
 
         while True:
