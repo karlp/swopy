@@ -364,7 +364,7 @@ Exception in thread Thread-1:
     return bytes
 
 def trace_read(dev, count):
-    logging.debug("reading %d bytes of trace buffer", count)
+    #logging.debug("reading %d bytes of trace buffer", count)
     res = dev.read(STLINK_EP_TRACE, count, 0)
     #print("trace read Received: ", res)
     return res

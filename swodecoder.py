@@ -174,7 +174,7 @@ if __name__ == "__main__":
     parser = PacketParser(target=PacketReceiverConsolePrinter(opts.address))
 
     with opts.file:
-        print("file pos = ", opts.file.tell())
+        #print("file pos = ", opts.file.tell())
         if opts.follow:
             opts.file.seek(0, os.SEEK_END)
             size = opts.file.tell()
@@ -186,7 +186,7 @@ if __name__ == "__main__":
         bb = opts.file.read(1024)
 
         while True:
-            print("file pos = ", opts.file.tell())
+            #print("file pos = ", opts.file.tell())
             if len(bb):
                 [parser.send(ord(b)) for b in bb]
             else:
