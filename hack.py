@@ -276,7 +276,7 @@ def trace_on(dev, buff=4096, hz=2000000):
     res = xfer_normal_input(dev, cmd, 2)
     logging.debug("START TRACE (buffer= %d, hz= %d)", buff, hz)
 
-def enable_trace(dev, stim_bits=1, syncpackets=1, cpu_hz=DEFAULT_CPU_HZ):
+def enable_trace(dev, stim_bits=1, syncpackets=2, cpu_hz=DEFAULT_CPU_HZ):
     """
     setup and turn on trace for the given stimulus channels (default 0)
     sync packets are turned on, but as slow as possible by default.
