@@ -334,7 +334,7 @@ on page C1-874.
     """
     reg = xfer_read32(dev, DWT_CTRL, 4)[0]
     reg &= ~(3<<10)
-    reg |= (syncbits << 10)
+    reg |= (syncbits << 10) | 1 # Must have cyccnt to have cyccnt tap!
     xfer_write32(dev, DWT_CTRL, [reg])
 
 # Both of these return 0x80
