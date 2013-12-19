@@ -34,6 +34,8 @@ Tips
 You _probably_ will want to edit swodecoder.py, in the PacketParser's
 target parameter, if you want to change the output formatting.
 
+http://false.ekta.is/2013/12/using-swoswv-streaming-data-with-stlink-under-linux-part-2/
+
 Bugs
 ====
 The STLink firmware gets into some screwy states sometimes, you need to
