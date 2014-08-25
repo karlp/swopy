@@ -169,6 +169,7 @@ if __name__ == "__main__":
     ap.add_argument('file', type=argparse.FileType('rb', 0), help="swo binary output file to parse", default="-")
     ap.add_argument("--address", "-a", type=int, default=-1, help="which channels to print, -1 for all")
     ap.add_argument("--follow", "-f", action="store_true", help="Seek to the 1024 bytes before the end of file first!", default=False)
+    ap.add_argument("--follow_all", "-F", action="store_true", help="Read the whole file, but follow it", default=False)
     opts = ap.parse_args()
 
     parser = PacketParser(target=PacketReceiverConsolePrinter(opts.address))
@@ -190,7 +191,7 @@ if __name__ == "__main__":
             if len(bb):
                 [parser.send(ord(b)) for b in bb]
             else:
-                if opts.follow:
+                if opts.follow or opts.follow_all:
                     time.sleep(0.5)
                 else:
                     print("# All finished!")
