@@ -331,6 +331,11 @@ Synchronization packet rate:
 11 = Synchronization counter tap at CYCCNT[28]
 For more information see The synchronization packet timer
 on page C1-874.
+
+To use synchronization (heartbeat and hot-connect synchronization),
+CYCCNTENA must be set to 1, SYNCTAP must be set to one of its values, and
+SYNCENA must be set to 1
+
     """
     reg = xfer_read32(dev, DWT_CTRL, 4)[0]
     reg &= ~(3<<10)
