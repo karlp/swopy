@@ -590,6 +590,14 @@ class Swopy(cmd.Cmd):
         print("Disconnected with state in %d" % s)
         return True
 
+    def do_voltage_trace(self, args):
+        """request the voltage continuously and print to screen. (blocks swo)"""
+        with self.LOCK_DEV:
+            while True:
+                volts = get_voltage(self.dev)
+                print("Voltage: ", volts)
+
+
     def cmdloop(self):
         while True:
             try:
