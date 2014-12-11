@@ -16,6 +16,7 @@ import usb.util
 
 from magic import *
 
+#DEFAULT_CPU_HZ = 32000000
 DEFAULT_CPU_HZ = 24000000
 
 logging.basicConfig(level=logging.DEBUG)
@@ -475,10 +476,10 @@ class Swopy(cmd.Cmd):
         """Connect to the target"""
         dev = self.dev
         if self.LOCK_DEV.acquire(1):
-            v = get_version(dev)
-            print(v)
             get_mode(dev)
             leave_state(dev)
+            v = get_version(dev)
+            print(v)
 
             # OOCD claims this version, but no idea where it comes from, or how valid it is.
             if v.jtag_ver >= 13:
