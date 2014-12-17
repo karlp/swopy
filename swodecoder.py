@@ -18,13 +18,20 @@ class OverflowPacket(ITMDWTPacket):
     def __repr__(self):
         return "OverflowPacket"
 
+class TimestampPacket(ITMDWTPacket):
+    def __init__(self, delta):
+        self.delta = delta
+
+    def __repr__(self):
+        return "TimestampPacket"
+
 class SourcePacket(ITMDWTPacket):
     def __init__(self, address, source, size, data):
         self.address = address
         self.source = source
         self.size = size
         if size == 1:
-            self.data = data[0]
+            self.sdata = self.data = data[0]
         elif size == 2:
             d = bytearray(data)
             self.data = struct.unpack_from("<H", d)[0]
@@ -67,7 +74,7 @@ def PacketParser(target, skip_to_sync=True):
                 if b == 0x80 and (len(frame) == 5):
                     frame.append(b)
                 else:
-                    print("Not in sync: invalid byte for sync frame: %d" % b)
+                    #print("Not in sync: invalid byte for sync frame: %d" % b)
                     frame = []
 
             #print("Frame so far", frame)
@@ -87,7 +94,7 @@ def PacketParser(target, skip_to_sync=True):
                     if b == 0x80 and (len(frame) == 5):
                         frame.append(b)
                     else:
-                        print("invalid sync frame byte? trying to resync: %d" % b)
+                        print("invalid sync frame byte? trying to resync: %d, %d" % (b, len(frame)))
                         frame = []
                 if frame == synchro:
                     target.send(SynchroPacket())
@@ -101,6 +108,13 @@ def PacketParser(target, skip_to_sync=True):
             if b == 0x70:
                 print("Overflow!")
                 target.send(OverflowPacket())
+            elif (b & 0x80) == 0x80:
+                ts = 0
+                while (b & 0x80) == 0x80:
+                    b = yield
+                    ts <<= 7
+                    ts |= b & 0x7F
+                target.send(TimestampPacket(ts))
             else:
                 print("Protocol packet decoding not handled, breaking stream to next sync :( byte was: %d (%x)" % (b, b))
                 in_sync = False
@@ -131,16 +145,33 @@ def InsaneVerbosePacketReceiver():
 
 @coroutine
 def PacketReceiverConsolePrinter(valid_address=-1):
+    ts = 0
+    buf = ''
+    bts = 0
+    lbts = 0
+    lts = {}
     while True:
         f = yield
+        if hasattr(f, "delta"):
+            ts += f.delta
+            continue
         if not hasattr(f, "address"):
             # Skip things like synchro packets
             continue
         if f.address == valid_address or valid_address == -1:
             if (f.size == 1):
-                print(chr(f.data), end='')
+                if buf == '': bts = ts
+                buf = buf + chr(f.data)
+                if chr(f.data) == '\n':
+                    print("%.3f: %s" % ((bts-lbts)/120000000.0*1000, buf), end='')
+                    lbts = bts
+                    buf = ''
             else:
-                print("Channel %d: %d byte value: %d : %#x : %d" % (f.address, f.size, f.data, f.data, f.sdata))
+                if not lts.has_key(f.address):
+                    lts[f.address] = 0
+                t = (ts-lts[f.address])/120000000.0*1000
+                lts[f.address] = ts
+                print("%.3f: Channel %d: %d byte value: %d : %#x : %d" % (t, f.address, f.size, f.data, f.data, f.sdata))
 
 
 
